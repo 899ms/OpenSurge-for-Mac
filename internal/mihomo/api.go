@@ -22,14 +22,18 @@ type Version struct {
 }
 
 type TUNRuntimeState struct {
-	Enabled bool   `json:"enabled"`
-	Device  string `json:"device,omitempty"`
+	Enabled       bool     `json:"enabled"`
+	Device        string   `json:"device,omitempty"`
+	IPv4Addresses []string `json:"ipv4_addresses,omitempty"`
+	IPv6Addresses []string `json:"ipv6_addresses,omitempty"`
 }
 
 type runtimeConfigResponse struct {
 	TUN *struct {
-		Enable bool   `json:"enable"`
-		Device string `json:"device"`
+		Enable        bool     `json:"enable"`
+		Device        string   `json:"device"`
+		IPv4Addresses []string `json:"inet4-address"`
+		IPv6Addresses []string `json:"inet6-address"`
 	} `json:"tun"`
 }
 
@@ -325,7 +329,12 @@ func fetchTUNRuntimeStateWithClient(ctx context.Context, cfg config.Config, clie
 	if body.TUN == nil {
 		return TUNRuntimeState{}, fmt.Errorf("mihomo runtime config did not report TUN state")
 	}
-	return TUNRuntimeState{Enabled: body.TUN.Enable, Device: body.TUN.Device}, nil
+	return TUNRuntimeState{
+		Enabled:       body.TUN.Enable,
+		Device:        body.TUN.Device,
+		IPv4Addresses: body.TUN.IPv4Addresses,
+		IPv6Addresses: body.TUN.IPv6Addresses,
+	}, nil
 }
 
 func fetchProxyGroupsWithClient(ctx context.Context, cfg config.Config, client *http.Client) ([]ProxyGroup, error) {

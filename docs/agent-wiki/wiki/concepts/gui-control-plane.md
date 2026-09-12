@@ -216,9 +216,22 @@ Service 启动，已有来源快照继续可用，用户可重新导入 URL 恢�
 
 设备流量面板使用独立的受认证 `GET /api/v1/device-traffic`，不要在前端重复解释 raw
 connections。后端用 DHCP lease、applied 静态设备和当前观察到的网关 LAN 源 IPv4 建立
-下游 inventory，再按 mihomo `metadata.sourceIP` 归属当前活跃会话。带本机 process/
-processPath 证据、来自回环/网关地址或与这些证据共享源地址的连接聚合到独立
-`gateway_local`，不能把 Mac 放进 `devices`、下游设备数量或策略身份模型。GUI 在“活跃
+下游 inventory，再按 mihomo `metadata.sourceIP` 归属当前活跃会话。本机身份由
+`internal/controlapi/gateway_local.go` 统一判断：系统 TUN 快照额外读取一次 mihomo
+`/configs` 的实际 `inet4-address`/`inet6-address`，同时要求 `type=Tun`、
+`inboundName=DEFAULT-TUN` 和精确本机源地址。只取接口地址，不取整个 CIDR；下游也
+经过 `DEFAULT-TUN`，并可能具有相同 `inboundIP`，所以入口字段不能单独证明本机来源。
+回环/网关 Mac 源地址仍作为本机身份，但 `opensurge-ipv6` listener 和
+`inboundUser=device:…` 优先排除。累计流量、速率和本机关闭连接操作复用这个判断。
+
+不能用 `process/processPath` 或共享源 IP 推断本机身份。mihomo 默认 `strict` 只在
+规则需要时查询进程；订阅有无 `PROCESS-NAME`、规则顺序、进程查询失败都不能改变
+流量归属。不能通过强制 `find-process-mode: always` 代替身份修复。IPv6 地址必须来自
+实际运行状态，不能按 desired `auto` 或旧快照同时猜测 fake-AAAA 与显式 TUN 两种身份。
+读取 TUN 身份失败时，流量 API 返回 `connection_error` 并保留可确认的清单；本机关闭
+连接接口返回 `local_identity_unavailable`，不部分执行。纯显式代理快照不额外读 `/configs`。
+
+本机连接聚合到独立 `gateway_local`，不能把 Mac 放进 `devices`、下游设备数量或策略身份模型。GUI 在“活跃
 设备”中固定把“本机 Mac”显示为第一行，并根据实际 connection type 显示 TUN、显式代理
 或两者；网关停止时显示网关未运行。
 

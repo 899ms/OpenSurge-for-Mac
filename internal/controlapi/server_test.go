@@ -2415,7 +2415,7 @@ func TestDeviceTrafficEndpointAttributesLiveMihomoConnections(t *testing.T) {
 	server.fetchConnections = func(context.Context, config.Config) (mihomo.ConnectionsSnapshot, error) {
 		return mihomo.ConnectionsSnapshot{UploadTotal: 100, DownloadTotal: 900, Connections: []mihomo.Connection{
 			{ID: "one", Upload: 100, Download: 900, Chains: []string{"流媒体组", "美国-02"}, Metadata: map[string]any{"sourceIP": "192.168.1.188"}},
-			{ID: "local", Upload: 20, Download: 80, Chains: []string{"Proxy", "edge"}, Metadata: map[string]any{"sourceIP": "198.18.0.1", "type": "Tun", "process": "Safari"}},
+			{ID: "local", Upload: 20, Download: 80, Chains: []string{"Proxy", "edge"}, Metadata: map[string]any{"sourceIP": "198.18.0.1", "type": "Tun", "inboundName": mihomo.SystemTUNListenerName}},
 			{ID: "observed", Upload: 10, Download: 40, Chains: []string{"DIRECT"}, Metadata: map[string]any{"sourceIP": "192.168.1.189"}},
 		}}, nil
 	}
@@ -2652,7 +2652,7 @@ func newReadyMihomoTestServer(t *testing.T) *httptest.Server {
 		case "/version":
 			_, _ = w.Write([]byte(`{"version":"test","meta":true}`))
 		case "/configs":
-			_, _ = w.Write([]byte(`{"tun":{"enable":true,"device":"utun-test"}}`))
+			_, _ = w.Write([]byte(`{"tun":{"enable":true,"device":"utun-test","inet4-address":["198.18.0.1/30"]}}`))
 		case "/proxies", "/providers/proxies", "/providers/rules":
 			_, _ = w.Write([]byte(`{"proxies":{},"providers":{}}`))
 		default:

@@ -63,7 +63,7 @@ func TestAggregateDeviceTrafficLabelsRouterBypassWithoutMihomoSessions(t *testin
 	leases := []device.Client{{
 		Hostname: "PlayStation-5", IP: "192.168.1.190", MAC: "aa:bb:cc:dd:ee:05", Online: true, ExpiresAt: time.Now().Add(time.Hour),
 	}}
-	result := aggregateDeviceTrafficWithPolicy(leases, policy, mihomo.ConnectionsSnapshot{}, "192.168.1.20", 24, false)
+	result := aggregateDeviceTrafficWithPolicy(leases, policy, mihomo.ConnectionsSnapshot{}, newGatewayLocalIdentity("192.168.1.20", testSystemTUNRuntime()), 24, false)
 	if len(result.Devices) != 1 || result.Devices[0].GatewayTarget != device.GatewayTargetUpstreamRouter || result.Devices[0].PrimaryEgress != "主路由直连" {
 		t.Fatalf("router bypass traffic row = %#v", result.Devices)
 	}
@@ -88,7 +88,7 @@ func TestAggregateSameLANDeviceTrafficUsesStaticAndObservedIdentities(t *testing
 		{Upload: 1, Download: 2, Chains: []string{"DIRECT"}, Metadata: map[string]any{"sourceIP": "192.168.5.123"}},
 	}}
 
-	result := aggregateDeviceTrafficWithPolicy(nil, policy, snapshot, "192.168.5.123", 24, true)
+	result := aggregateDeviceTrafficWithPolicy(nil, policy, snapshot, newGatewayLocalIdentity("192.168.5.123", testSystemTUNRuntime()), 24, true)
 	if len(result.Devices) != 2 || result.Totals.ActiveConnections != 2 || result.UnmatchedConnections != 2 {
 		t.Fatalf("same-LAN traffic = %#v", result)
 	}
@@ -117,8 +117,8 @@ func TestAggregateDeviceTrafficSeparatesGatewayLocalAndUnclassifiedConnections(t
 		Hostname: "Apple-TV", IP: "192.168.5.88", MAC: "aa:bb:cc:dd:ee:88", Online: true, ExpiresAt: time.Now().Add(time.Hour),
 	}}
 	snapshot := mihomo.ConnectionsSnapshot{Connections: []mihomo.Connection{
-		{Upload: 100, Download: 900, Chains: []string{"Proxy", "edge"}, Metadata: map[string]any{"sourceIP": "198.18.0.1", "type": "Tun", "process": "Safari"}},
-		{Upload: 20, Download: 80, Chains: []string{"DIRECT"}, Metadata: map[string]any{"sourceIP": "198.18.0.1", "type": "Tun"}},
+		{Upload: 100, Download: 900, Chains: []string{"Proxy", "edge"}, Metadata: map[string]any{"sourceIP": "198.18.0.1", "type": "Tun", "inboundName": mihomo.SystemTUNListenerName}},
+		{Upload: 20, Download: 80, Chains: []string{"DIRECT"}, Metadata: map[string]any{"sourceIP": "198.18.0.1", "type": "Tun", "inboundName": mihomo.SystemTUNListenerName}},
 		{Upload: 10, Download: 40, Chains: []string{"DIRECT"}, Metadata: map[string]any{"sourceIP": "127.0.0.1", "type": "HTTP"}},
 		{Upload: 5, Download: 50, Chains: []string{"DIRECT"}, Metadata: map[string]any{"sourceIP": "192.168.5.88"}},
 		{Upload: 7, Download: 70, Chains: []string{"DIRECT"}, Metadata: map[string]any{"sourceIP": "192.168.5.126"}},
@@ -126,7 +126,7 @@ func TestAggregateDeviceTrafficSeparatesGatewayLocalAndUnclassifiedConnections(t
 		{Upload: 1, Download: 2, Chains: []string{"DIRECT"}, Metadata: map[string]any{}},
 	}}
 
-	result := aggregateDeviceTrafficWithPolicy(leases, device.PolicySet{}, snapshot, "192.168.5.123", 24, true)
+	result := aggregateDeviceTrafficWithPolicy(leases, device.PolicySet{}, snapshot, newGatewayLocalIdentity("192.168.5.123", testSystemTUNRuntime()), 24, true)
 	if result.GatewayLocal.ActiveConnections != 3 || result.GatewayLocal.Upload != 130 || result.GatewayLocal.Download != 1020 {
 		t.Fatalf("gateway local counters = %#v", result.GatewayLocal)
 	}
@@ -149,7 +149,7 @@ func TestAggregateSameLANDeviceTrafficDoesNotRenameConflictingLease(t *testing.T
 		Hostname: "other-device", IP: "192.168.5.124", MAC: "aa:bb:cc:dd:ee:99", Online: true, ExpiresAt: time.Now().Add(time.Hour),
 	}}
 
-	result := aggregateDeviceTrafficWithPolicy(leases, policy, mihomo.ConnectionsSnapshot{}, "192.168.5.123", 24, true)
+	result := aggregateDeviceTrafficWithPolicy(leases, policy, mihomo.ConnectionsSnapshot{}, newGatewayLocalIdentity("192.168.5.123", testSystemTUNRuntime()), 24, true)
 	if len(result.Devices) != 1 || result.Devices[0].Name != "" || result.Devices[0].Hostname != "other-device" || result.Devices[0].IdentitySource != identitySourceDHCPLease {
 		t.Fatalf("conflicting identity row = %#v", result.Devices)
 	}
@@ -214,7 +214,7 @@ func TestTrafficRateSamplerUsesConnectionDeltasForGatewayAndDevices(t *testing.T
 		{ID: "host", Upload: 40, Download: 400, Metadata: map[string]any{"sourceIP": "127.0.0.1"}},
 	}}
 	firstResponse := aggregateDeviceTraffic(leases, first)
-	sampler.annotate(&firstResponse, first, now)
+	sampler.annotate(&firstResponse, first, newGatewayLocalIdentity("", mihomo.TUNRuntimeState{}), now)
 	if firstResponse.GatewayRates != (TrafficRates{}) || firstResponse.Devices[0].UploadRate != 0 {
 		t.Fatalf("first sample rates = %#v / %#v", firstResponse.GatewayRates, firstResponse.Devices[0])
 	}
@@ -225,7 +225,7 @@ func TestTrafficRateSamplerUsesConnectionDeltasForGatewayAndDevices(t *testing.T
 		{ID: "new", Upload: 9999, Download: 9999, Metadata: map[string]any{"sourceIP": "192.168.1.60"}},
 	}}
 	secondResponse := aggregateDeviceTraffic(leases, second)
-	sampler.annotate(&secondResponse, second, now.Add(2*time.Second))
+	sampler.annotate(&secondResponse, second, newGatewayLocalIdentity("", mihomo.TUNRuntimeState{}), now.Add(2*time.Second))
 
 	if secondResponse.GatewayRates.Upload != 1500 || secondResponse.GatewayRates.Download != 4000 {
 		t.Fatalf("gateway rates = %#v", secondResponse.GatewayRates)
@@ -247,12 +247,12 @@ func TestTrafficRateSamplerResetsAfterLongGap(t *testing.T) {
 	sampler := newTrafficRateSampler()
 	snapshot := mihomo.ConnectionsSnapshot{Connections: []mihomo.Connection{{ID: "one", Upload: 100, Download: 200}}}
 	response := DeviceTrafficResponse{}
-	sampler.annotate(&response, snapshot, now)
+	sampler.annotate(&response, snapshot, newGatewayLocalIdentity("", mihomo.TUNRuntimeState{}), now)
 
 	snapshot.Connections[0].Upload = 10_000
 	snapshot.Connections[0].Download = 20_000
 	response = DeviceTrafficResponse{}
-	sampler.annotate(&response, snapshot, now.Add(maxTrafficSampleGap+time.Second))
+	sampler.annotate(&response, snapshot, newGatewayLocalIdentity("", mihomo.TUNRuntimeState{}), now.Add(maxTrafficSampleGap+time.Second))
 	if response.GatewayRates != (TrafficRates{}) {
 		t.Fatalf("rates after long gap = %#v", response.GatewayRates)
 	}
