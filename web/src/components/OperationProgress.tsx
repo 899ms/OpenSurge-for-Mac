@@ -29,11 +29,18 @@ const phaseLabels: Record<string, string> = {
   clearing_runtime: '清理本次运行状态',
   rolling_back: '操作未完成，正在回滚网络改动',
   restoring_config: '恢复之前的配置与网关',
+  probing_dhcp: '正在探测 DHCP OFFER',
 }
 
 const kindLabels: Record<string, string> = {
   start: '启动网关', stop: '停止网关', reload: '重载网关', 'restart-mihomo': '重启 Mihomo',
   'save-device-policy': '保存设备配置', 'apply-profile': '应用代理与规则源', 'apply-tailscale': '应用 Tailscale 配置',
+  'dhcp-probe': '检查路由器 DHCP 是否已关闭', 'router-dhcp-restored': '检查路由器 DHCP 是否已恢复',
+}
+
+const successMessages: Record<string, string> = {
+  'dhcp-probe': '本次探测未收到 DHCP OFFER，可以继续启动 OpenSurge。',
+  'router-dhcp-restored': '已收到 DHCP OFFER，可以继续恢复 Mac 自动 DHCP。',
 }
 
 const noticeLabels: Record<string, string> = {
@@ -46,9 +53,13 @@ export function OperationProgress({ onOpenDiagnostics }: { onOpenDiagnostics: ()
   const [now, setNow] = useState(Date.now)
   useEffect(() => watchOperations(), [])
 
-  const visible = operations.filter(operation => !operation.dismissed && (operation.state !== 'succeeded' || now - Date.parse(operation.updated_at || '') < 6000))
-  const active = visible.filter(operation => operation.state === 'running')
-  const operation = [...(active.length ? active : visible)].sort((a, b) => Date.parse(b.created_at || '') - Date.parse(a.created_at || ''))[0]
+  const newestFirst = [...operations].reverse().sort((a, b) => Date.parse(b.created_at || '') - Date.parse(a.created_at || ''))
+  const active = newestFirst.filter(operation => !operation.dismissed && operation.state === 'running')
+  // Select the latest result before checking dismissal/expiry. Filtering first
+  // would reveal older failures when that result disappears. Unfinished work
+  // still takes priority, including operations whose outcome is unconfirmed.
+  const candidate = active[0] || newestFirst[0]
+  const operation = candidate && !candidate.dismissed && (candidate.state !== 'succeeded' || now - Date.parse(candidate.updated_at || '') < 6000) ? candidate : undefined
   const ticking = operation?.state === 'running' || operation?.state === 'succeeded'
   useEffect(() => {
     if (!ticking) return
@@ -73,7 +84,7 @@ export function OperationProgress({ onOpenDiagnostics }: { onOpenDiagnostics: ()
       <span className="operation-progress-symbol" aria-hidden="true">{running && !uncertain ? <span className="button-spinner" /> : status === 'succeeded' ? '✓' : '!'}</span>
       <div className="operation-progress-status" role="status" aria-live="polite" aria-atomic="true">
         <strong>{t(kindLabels[operation.kind] || '网关操作')}<span>{t(uncertain ? '结果尚未确认' : running ? '进行中' : operation.state === 'succeeded' ? '已完成' : '未完成')}</span></strong>
-        <p>{running ? phase : operation.state === 'succeeded' ? t('后台操作已完成') : t('最后执行阶段：{{phase}}', { phase })}</p>
+        <p>{running ? phase : operation.state === 'succeeded' ? t(successMessages[operation.kind] || '后台操作已完成') : t('最后执行阶段：{{phase}}', { phase })}</p>
       </div>
       {!running && <button type="button" className="operation-progress-dismiss" onClick={() => dismissOperation(operation.id)} aria-label={t('关闭操作进度')}>×</button>}
     </div>

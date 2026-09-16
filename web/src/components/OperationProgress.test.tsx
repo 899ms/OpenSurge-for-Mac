@@ -76,6 +76,93 @@ describe('global operation progress', () => {
     expect(screen.queryByLabelText('当前操作进度')).toBeNull()
   })
 
+  it.each(['manual', 'automatic'])('does not reveal an earlier failure after %s dismissal of the latest result', dismissal => {
+    begin()
+    recordOperation({ id: 'op-1', kind: 'start', state: 'failed', error: 'previous startup failed' })
+    const view = render(<OperationProgress onOpenDiagnostics={() => {}} />)
+    expect(screen.getByText('previous startup failed')).toBeTruthy()
+
+    act(() => {
+      vi.advanceTimersByTime(1000)
+      const now = new Date().toISOString()
+      recordOperation({ id: 'op-2', kind: 'reload', state: 'running', created_at: now, updated_at: now })
+    })
+    expect(screen.queryByText('previous startup failed')).toBeNull()
+    act(() => recordOperation({ id: 'op-2', kind: 'reload', state: 'succeeded' }))
+    expect(screen.getByText('已完成')).toBeTruthy()
+    if (dismissal === 'manual') fireEvent.click(screen.getByRole('button', { name: '关闭操作进度' }))
+    else act(() => vi.advanceTimersByTime(6000))
+    expect(screen.queryByLabelText('当前操作进度')).toBeNull()
+
+    // Polling and remounting must not turn completed history into a new notice.
+    act(() => recordOperation({ id: 'op-1', kind: 'start', state: 'failed', error: 'previous startup failed' }))
+    view.unmount()
+    render(<OperationProgress onOpenDiagnostics={() => {}} />)
+    expect(screen.queryByLabelText('当前操作进度')).toBeNull()
+    expect(getOperation('op-1')?.error).toBe('previous startup failed')
+  })
+
+  it('keeps the latest result when creation timestamps tie and older status reads arrive later', () => {
+    begin()
+    recordOperation({ id: 'op-1', kind: 'start', state: 'succeeded' })
+    const now = new Date().toISOString()
+    recordOperation({ id: 'op-2', kind: 'stop', state: 'failed', error: 'latest stop failed', created_at: now, updated_at: now })
+    recordOperation({ id: 'op-1', kind: 'start', state: 'succeeded' })
+    render(<OperationProgress onOpenDiagnostics={() => {}} />)
+    expect(screen.getByText('latest stop failed')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '关闭操作进度' }))
+    expect(screen.queryByLabelText('当前操作进度')).toBeNull()
+  })
+
+  it('preserves an earlier unconfirmed operation without replaying its eventual result', () => {
+    begin('reload')
+    markOperationConnection('op-1', 'unknown')
+    vi.advanceTimersByTime(1000)
+    const now = new Date().toISOString()
+    recordOperation({ id: 'op-2', kind: 'restart-mihomo', state: 'running', created_at: now, updated_at: now })
+    render(<OperationProgress onOpenDiagnostics={() => {}} />)
+    expect(screen.getByText('重启 Mihomo')).toBeTruthy()
+    expect(screen.getByText('另有 1 个操作进行中')).toBeTruthy()
+    act(() => recordOperation({ id: 'op-2', kind: 'restart-mihomo', state: 'succeeded' }))
+    expect(screen.getByText('重载网关')).toBeTruthy()
+    expect(screen.getByText('结果尚未确认')).toBeTruthy()
+    act(() => vi.advanceTimersByTime(6000))
+    act(() => recordOperation({ id: 'op-1', kind: 'reload', state: 'failed', error: 'earlier reload failed' }))
+    expect(screen.queryByLabelText('当前操作进度')).toBeNull()
+  })
+
+  it.each([
+    { kind: 'dhcp-probe', title: '检查路由器 DHCP 是否已关闭', result: '本次探测未收到 DHCP OFFER，可以继续启动 OpenSurge。' },
+    { kind: 'router-dhcp-restored', title: '检查路由器 DHCP 是否已恢复', result: '已收到 DHCP OFFER，可以继续恢复 Mac 自动 DHCP。' },
+  ])('shows $kind progress across page changes and explains the completed probe', ({ kind, title, result }) => {
+    begin(kind)
+    const first = render(<OperationProgress onOpenDiagnostics={() => {}} />)
+    act(() => recordOperation({ id: 'op-1', kind, state: 'running', phase: 'probing_dhcp' }))
+    act(() => vi.advanceTimersByTime(3000))
+    first.unmount()
+    render(<OperationProgress onOpenDiagnostics={() => {}} />)
+    expect(screen.getByText(title)).toBeTruthy()
+    expect(screen.getByText('正在探测 DHCP OFFER')).toBeTruthy()
+    expect(screen.getByText('已用时 3 秒')).toBeTruthy()
+    expect(screen.getByRole('progressbar')).toBeTruthy()
+    act(() => recordOperation({ id: 'op-1', kind, state: 'succeeded' }))
+    expect(screen.getByText(result)).toBeTruthy()
+    expect(screen.queryByRole('progressbar')).toBeNull()
+  })
+
+  it.each(['dhcp-probe', 'router-dhcp-restored'])('renders $kind progress and completion in English', async kind => {
+    await prepareLanguage('en')
+    activateLanguage('en')
+    begin(kind)
+    recordOperation({ id: 'op-1', kind, state: 'running', phase: 'probing_dhcp' })
+    render(<OperationProgress onOpenDiagnostics={() => {}} />)
+    expect(screen.getByText('Probing for DHCP OFFER responses')).toBeTruthy()
+    expect(screen.getByLabelText('Current operation progress').textContent).not.toMatch(/[\u3400-\u9fff]/)
+    act(() => recordOperation({ id: 'op-1', kind, state: 'succeeded' }))
+    expect(screen.getByText(/You can proceed to/)).toBeTruthy()
+    expect(screen.getByLabelText('Current operation progress').textContent).not.toMatch(/[\u3400-\u9fff]/)
+  })
+
   it('renders stages, notices and unknown outcomes in English', async () => {
     await prepareLanguage('en')
     activateLanguage('en')

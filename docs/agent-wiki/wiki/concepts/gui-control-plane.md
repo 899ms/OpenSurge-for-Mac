@@ -185,11 +185,15 @@ OFFER 探测不可用，认证后的 Web GUI 提供带断网警告和显式人�
 自动 DHCP 恢复，直接进入 `complete_static`。该动作不调用 `ProbeDHCP` 或 `SetDHCP`，必须
 保留持久化说明，并提示其他客户端需要有效静态配置或另一个 DHCP 服务器。
 
-初次启动、停止、重载、Mihomo 恢复，以及设备策略/来源/Tailscale 配置应用，复用全局
-operation 进度卡。客户端提交即显示等待状态，后续 `phase`、`phase_started_at`、
+初次启动、停止、重载、Mihomo 恢复、路由器 DHCP 关闭/恢复 OFFER 检查，以及设备策略/
+来源/Tailscale 配置应用，复用全局 operation 进度卡。客户端提交即显示等待状态，后续 `phase`、`phase_started_at`、
 `notices` 来自 Go 生命周期实际边界；只显示阶段与耗时，不模拟百分比。进度卡在页面
-切换后继续显示，刷新时只恢复未完成操作，不重新弹出旧成功记录。网络页的 DHCP 接管
-client acceptance 不会被“启动完成”替代。
+切换后继续显示，刷新时只恢复未完成操作，不重新弹出旧完成记录。当前没有未收起的进行中
+操作时，只展示最新操作的结果；该结果被关闭或自动消失后，不回退展示旧成功或失败。
+轮询更新不能改变同一创建时间下的首次登记顺序，旧记录仍保留供诊断查看。
+DHCP 检查复用同步请求的关联 ID，探测期间报告 `probing_dhcp`；只有探测结果符合要求且
+恢复状态保存成功后，才显示完成。未收到 OFFER 只表示本次探测结果，不扩大为路由器状态的
+绝对保证。网络页的 DHCP 接管 client acceptance 不会被“启动完成”替代。
 
 Helper 请求可选 `watch_progress`：新 Helper 先发送带 `progress` 的 JSON 帧，最后仍
 返回原有结果；旧客户端不请求该字段时只收到最终帧，新客户端也兼容旧 Helper 的单帧
