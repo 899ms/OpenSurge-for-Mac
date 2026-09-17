@@ -31,7 +31,7 @@ export function Empty({ text }: { text: string }) { return <div className="empty
 export function StatusDot({ status }: { status: string }) {
   const state = status.includes('running') || status === 'ready'
     ? 'running'
-    : status.includes('degraded') || status === 'failed' || status === 'unknown'
+    : status.includes('degraded') || status === 'failed' || status === 'unknown' || status === 'interrupted'
       ? 'degraded'
       : 'stopped'
   return <span className={`status-dot ${state}`} aria-label={state} />

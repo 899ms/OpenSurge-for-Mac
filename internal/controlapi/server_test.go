@@ -39,6 +39,34 @@ func TestDoctorChecksForControlHidesRootPrivileges(t *testing.T) {
 	}
 }
 
+func TestOverviewAndMenuBarExposeUnifiedTakeoverStates(t *testing.T) {
+	server := newTestServer(t)
+
+	overviewResponse := performAuthorized(server, http.MethodGet, "/api/v1/overview", nil)
+	if overviewResponse.Code != http.StatusOK {
+		t.Fatalf("overview status=%d body=%s", overviewResponse.Code, overviewResponse.Body.String())
+	}
+	var overview Overview
+	if err := json.Unmarshal(overviewResponse.Body.Bytes(), &overview); err != nil {
+		t.Fatal(err)
+	}
+	if overview.Status.IPv4Takeover != "stopped" || overview.Status.IPv6Takeover != "disabled" {
+		t.Fatalf("overview takeover states = ipv4:%q ipv6:%q", overview.Status.IPv4Takeover, overview.Status.IPv6Takeover)
+	}
+
+	menuResponse := performAuthorized(server, http.MethodGet, "/api/v1/menubar", nil)
+	if menuResponse.Code != http.StatusOK {
+		t.Fatalf("menubar status=%d body=%s", menuResponse.Code, menuResponse.Body.String())
+	}
+	var menu MenuBarStatus
+	if err := json.Unmarshal(menuResponse.Body.Bytes(), &menu); err != nil {
+		t.Fatal(err)
+	}
+	if menu.IPv4Takeover != overview.Status.IPv4Takeover || menu.IPv6Takeover != overview.Status.IPv6Takeover {
+		t.Fatalf("menubar takeover states = ipv4:%q ipv6:%q", menu.IPv4Takeover, menu.IPv6Takeover)
+	}
+}
+
 func TestInspectSourceInventory(t *testing.T) {
 	data := []byte(`proxies:
   - name: edge

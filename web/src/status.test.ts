@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { needsNetworkRecoveryWarning, recoveryLabel, statusLabel } from './status'
+import { needsNetworkRecoveryWarning, recoveryLabel, statusLabel, takeoverLabel } from './status'
 
 describe('status labels', () => {
   it('does not confuse an unreachable control service with a stopped gateway', () => {
@@ -23,5 +23,15 @@ describe('status labels', () => {
     expect(needsNetworkRecoveryWarning('gateway_stopped_waiting_router_dhcp')).toBe(true)
     expect(needsNetworkRecoveryWarning('router_dhcp_restored')).toBe(true)
     expect(needsNetworkRecoveryWarning('complete_static')).toBe(false)
+  })
+
+  it('uses one vocabulary for IPv4 and IPv6 takeover states', () => {
+    expect(takeoverLabel('ready')).toBe('正在接管')
+    expect(takeoverLabel('waiting')).toBe('等待上游 IPv6')
+    expect(takeoverLabel('stopped')).toBe('已停止')
+    expect(takeoverLabel('disabled')).toBe('已关闭')
+    expect(takeoverLabel('failed')).toBe('运行异常')
+    expect(takeoverLabel('interrupted')).toBe('重启后待清理')
+    expect(takeoverLabel()).toBe('未知')
   })
 })

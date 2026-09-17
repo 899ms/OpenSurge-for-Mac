@@ -29,6 +29,8 @@ struct MenuBarStatus: Codable, Equatable {
     let tunError: String?
     let pfAnchor: String
     let forwarding: String
+    let ipv4Takeover: String?
+    let ipv6Takeover: String?
     let clientCount: Int
     let drift: Bool
     let doctorHealthy: Bool
@@ -48,6 +50,8 @@ struct MenuBarStatus: Codable, Equatable {
         case tunError = "tun_error"
         case pfAnchor = "pf_anchor"
         case forwarding
+        case ipv4Takeover = "ipv4_takeover"
+        case ipv6Takeover = "ipv6_takeover"
         case clientCount = "client_count"
         case drift
         case doctorHealthy = "doctor_healthy"
@@ -72,6 +76,8 @@ struct MenuBarStatus: Codable, Equatable {
         tunError: String? = nil,
         pfAnchor: String,
         forwarding: String,
+        ipv4Takeover: String? = nil,
+        ipv6Takeover: String? = nil,
         clientCount: Int,
         drift: Bool,
         doctorHealthy: Bool,
@@ -94,6 +100,8 @@ struct MenuBarStatus: Codable, Equatable {
         self.tunError = tunError
         self.pfAnchor = pfAnchor
         self.forwarding = forwarding
+        self.ipv4Takeover = ipv4Takeover
+        self.ipv6Takeover = ipv6Takeover
         self.clientCount = clientCount
         self.drift = drift
         self.doctorHealthy = doctorHealthy
@@ -173,6 +181,17 @@ func menuBarIndicator(status: MenuBarStatus?, hasError: Bool) -> IndicatorState 
 }
 
 extension MenuBarStatus {
+    var ipv4TakeoverState: String {
+        if let ipv4Takeover { return ipv4Takeover }
+        if gateway == "stopped" { return "stopped" }
+        if gateway == "running" && pfAnchor == "loaded" && forwarding == "enabled" { return "ready" }
+        return "failed"
+    }
+
+    var ipv6TakeoverState: String {
+        ipv6Takeover ?? "unknown"
+    }
+
     var gatewayServicesActive: Bool {
         gateway == "running" || gateway == "degraded" || dhcp == "running" || mihomo == "running" || pfAnchor == "loaded"
     }
@@ -231,6 +250,8 @@ extension MenuBarStatus {
             "TUN: \(tun ?? "unknown")\(tunInterface.map { " [\($0)]" } ?? "")",
             "PF: \(pfAnchor)",
             "Forwarding: \(forwarding)",
+            "IPv4 takeover: \(ipv4TakeoverState)",
+            "IPv6 takeover: \(ipv6TakeoverState)",
             "Clients: \(clientCount)",
             "Drift: \(drift)",
             "Recovery: \(recoveryRequired ? recoveryStage ?? "required" : "none")",
