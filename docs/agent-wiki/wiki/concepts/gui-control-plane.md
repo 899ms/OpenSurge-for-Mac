@@ -5,6 +5,13 @@ OpenSurge 的完整 GUI 是 `web/` 中的 React 应用，菜单栏 App 是
 launcher。两者都只访问 `cmd/opensurge-control` 提供的 loopback API；业务规则继续位于
 Go gateway、device、mihomo 和 runtime 包中。
 
+原生应用图标由 `apps/menubar/Resources/OpenSurgeAppIcon.png` 经
+`scripts/build-menubar-app.sh` 等比生成各档 `.icns` 资源。1024 × 1024 源图已包含
+透明留白：白色底板主体宽约 824 px、每侧留白约 100 px；构建时不要再次补同样的边距。
+此比例用于传统 `.icns` 的视觉对齐，不是所有 macOS 图标格式的通用尺寸契约。
+未来采用 Icon Composer 时应按其模板重新校准并验证系统实际渲染。菜单栏状态项使用
+独立的 `OpenSurgeMenuBarIcon.png`，显示尺寸为 18 × 18 pt，不跟随应用图标的留白调整。
+
 菜单栏 App 不提供 start/stop 或策略切换。它只消费 `/api/v1/menubar`，显示网关、
 客户端、drift 和恢复状态，并通过一次性 bootstrap URL 打开 Web GUI。唯一独立动作是
 与网关状态无关的临时“合盖保持运行”开关；不要借此把菜单栏演变成第二套网关控制面。
@@ -141,6 +148,13 @@ Service。只有卸载、重新安装或修改系统级 Helper 才进入需要�
 因此 raw `forwarding == enabled` 不能单独算作 OpenSurge 服务仍活跃，也不能阻止完整退出
 或卸载。gateway manager 仍必须记录并恢复启动前 forwarding 值。
 
+菜单栏与 Web GUI 总览用“IPv4 接管”和“IPv6 接管”展示按地址族归一化后的运行状态，
+不能把 raw forwarding 直接改名成 IPv4 接管。IPv4 只有在当前 boot 的 gateway runtime
+active、PF anchor loaded、forwarding enabled 且整体 gateway running 时才显示正在接管；
+停止态即使宿主原本已经启用 forwarding 也显示已停止。IPv6 接管来自用户态 packet path，
+区分正在接管、自动模式等待上游、已关闭、已停止、异常与重启后待清理。底层
+`forwarding`、`ipv6_packet`、`native_ipv6_available` 和 `ipv6_reason` 继续保留用于诊断。
+
 菜单栏提供独立“卸载 OpenSurge”入口。卸载只以 `gateway == stopped` 为门禁，不受
 recovery 阶段影响；确认窗口允许保留配置/订阅/策略数据或彻底删除全部数据。管理员授权
 后只调用 pkg 安装到固定系统目录、root 拥有的卸载脚本；脚本必须自行再次确认 gateway
@@ -213,9 +227,22 @@ Service 启动，已有来源快照继续可用，用户可重新导入 URL 恢�
 
 设备流量面板使用独立的受认证 `GET /api/v1/device-traffic`，不要在前端重复解释 raw
 connections。后端用 DHCP lease、applied 静态设备和当前观察到的网关 LAN 源 IPv4 建立
-下游 inventory，再按 mihomo `metadata.sourceIP` 归属当前活跃会话。带本机 process/
-processPath 证据、来自回环/网关地址或与这些证据共享源地址的连接聚合到独立
-`gateway_local`，不能把 Mac 放进 `devices`、下游设备数量或策略身份模型。GUI 在“活跃
+下游 inventory，再按 mihomo `metadata.sourceIP` 归属当前活跃会话。本机身份由
+`internal/controlapi/gateway_local.go` 统一判断：系统 TUN 快照额外读取一次 mihomo
+`/configs` 的实际 `inet4-address`/`inet6-address`，同时要求 `type=Tun`、
+`inboundName=DEFAULT-TUN` 和精确本机源地址。只取接口地址，不取整个 CIDR；下游也
+经过 `DEFAULT-TUN`，并可能具有相同 `inboundIP`，所以入口字段不能单独证明本机来源。
+回环/网关 Mac 源地址仍作为本机身份，但 `opensurge-ipv6` listener 和
+`inboundUser=device:…` 优先排除。累计流量、速率和本机关闭连接操作复用这个判断。
+
+不能用 `process/processPath` 或共享源 IP 推断本机身份。mihomo 默认 `strict` 只在
+规则需要时查询进程；订阅有无 `PROCESS-NAME`、规则顺序、进程查询失败都不能改变
+流量归属。不能通过强制 `find-process-mode: always` 代替身份修复。IPv6 地址必须来自
+实际运行状态，不能按 desired `auto` 或旧快照同时猜测 fake-AAAA 与显式 TUN 两种身份。
+读取 TUN 身份失败时，流量 API 返回 `connection_error` 并保留可确认的清单；本机关闭
+连接接口返回 `local_identity_unavailable`，不部分执行。纯显式代理快照不额外读 `/configs`。
+
+本机连接聚合到独立 `gateway_local`，不能把 Mac 放进 `devices`、下游设备数量或策略身份模型。GUI 在“活跃
 设备”中固定把“本机 Mac”显示为第一行，并根据实际 connection type 显示 TUN、显式代理
 或两者；网关停止时显示网关未运行。
 

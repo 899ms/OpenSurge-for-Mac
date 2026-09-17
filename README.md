@@ -15,6 +15,7 @@
   <p>
     <a href="https://opensurge.pages.dev/zh-cn/">官网</a> ·
     <a href="https://github.com/YTwsy/OpenSurge-for-Mac/releases">下载</a> ·
+    <a href="https://opensurge.pages.dev/zh-cn/docs/">使用文档</a> ·
     <a href="docs/app-user-guide.zh-CN.md">App 指南</a> ·
     <a href="#能力">能力</a> ·
     <a href="#每设备策略">每设备策略</a> ·
@@ -27,9 +28,9 @@
         <img src="docs/images/opensurge-dashboard.png" width="100%" alt="OpenSurge 全屋网关主界面">
       </td>
       <td width="34%" valign="top">
-        <img src="docs/images/opensurge-policies.png" width="100%" alt="OpenSurge 策略与节点健康页面">
+        <img src="docs/images/readme/zh-CN/policies.png" width="100%" alt="OpenSurge 策略与节点健康页面">
         <br>
-        <img src="docs/images/opensurge-devices.png" width="100%" alt="OpenSurge 每设备策略页面">
+        <img src="docs/images/readme/zh-CN/devices.png" width="100%" alt="OpenSurge 每设备策略页面">
       </td>
     </tr>
   </table>
@@ -44,6 +45,10 @@ AP、SSID 或 VLAN 时，则可以使用独立下游 LAN。三种模式均可按
 分流、游戏机连美服、电视走流媒体节点。在局域网 DHCP 接管和独立下游 LAN 模式下，
 接入相应网络的手机、电视、PS5 和 VR 设备，都可以自动从 Mac 获取 DHCP/DNS，无需逐台
 修改网关和 DNS。
+
+> 想了解 OpenSurge 的具体功能、安装配置和常见使用场景，请访问 [OpenSurge 官网](https://opensurge.pages.dev/zh-cn/)。
+>
+> [功能介绍](https://opensurge.pages.dev/zh-cn/features/) · [使用指南](https://opensurge.pages.dev/zh-cn/guides/) · [用户文档](https://opensurge.pages.dev/zh-cn/docs/)
 
 <details>
   <summary><strong>十张图带你了解 OpenSurge</strong></summary>

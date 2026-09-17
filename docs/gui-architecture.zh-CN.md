@@ -170,6 +170,11 @@ URL，先保存 SHA-256 标识的只读快照，再检查 profile inventory 和�
 总览的 GATEWAY 卡片是网关身份和配置上下文的唯一入口：接口、LAN IPv4、当前配置的
 topology 与 desired/applied 状态都在卡内展示，不另设重复的信息条。`GET /api/v1/overview`
 直接返回当前配置的 `topology`，不能用只在恢复流程中落盘的 `recovery.topology` 代替。
+卡片的地址族状态统一使用“IPv4 接管”和“IPv6 接管”：前者组合当前 runtime、PF anchor
+和系统 IPv4 forwarding 判断 OpenSurge 是否实际拥有运行路径，不能因宿主预先开启
+forwarding 就显示为正在接管；后者反映 BPF broker 与 patched Mihomo 用户态 packet path，
+并保留自动模式等待原生上游 IPv6 的独立状态。原始 forwarding 与 IPv6 runtime 字段仍供
+CLI、诊断和网络设置页使用。
 总览页标题区的“启动网关”或“停止网关”只是进入“网络设置”的上下文入口，不直接调用
 gateway start/stop API；实际动作必须留在网络页，让用户先看到 topology、计划 blocker、
 DHCP 接管与恢复状态后再确认。
@@ -259,14 +264,24 @@ connections 与最多 80 行近期日志；已知 mihomo/upstream 凭据在 API 
 
 总览的设备流量面板每 2 秒读取受认证的 `GET /api/v1/device-traffic`。Control Service
 用 DHCP lease、applied 静态设备和当前观察到的网关 LAN IPv4 建立下游设备清单，再按
-mihomo connection 的 `metadata.sourceIP` 归属当前活跃会话 `upload`/`download`。带有
-本机 process/processPath 证据、来自回环/网关地址或与这些证据共享源地址的连接单独聚合
-到 `gateway_local`，不混入 `devices` 或下游设备合计；GUI 始终把“本机 Mac”固定为
+mihomo connection 的 `metadata.sourceIP` 归属当前活跃会话 `upload`/`download`。
+本机归属不依赖 `process/processPath` 或订阅是否带 `PROCESS-NAME`。快照中出现系统
+TUN 连接时，额外读取一次 mihomo `/configs` 的实际 `inet4-address`/`inet6-address`，
+同时匹配 `type=Tun`、`inboundName=DEFAULT-TUN` 和精确接口源地址；不能匹配整个
+TUN/fake-IP 子网，也不能用下游连接同样拥有的 `inboundIP` 判断来源。回环/网关 Mac
+地址仍属于本机，但 `opensurge-ipv6` listener 和 `inboundUser=device:…` 始终排除。
+这些连接单独聚合到 `gateway_local`，不混入 `devices` 或下游设备合计；GUI 始终把“本机 Mac”固定为
 “活跃设备”的第一行，并按实际 connection type 显示 TUN、显式代理或两者。没有 DHCP/
 静态身份、但能确认网关 LAN 源 IPv4 的会话进入 `observed_traffic` 行并计入
 `unidentified_device_connections`；地址缺失、网段外且没有本机证据等剩余连接进入
 `unclassified_connections`，只作为诊断提示。`unmatched_connections` 仅作为旧客户端
 兼容字段保留，当前 GUI 不再用它解释来源身份。
+
+累计流量、实时速率和“关闭本机旧连接”共用同一份本机身份判断。身份随当前运行中的
+TUN 地址更新，不从 desired IPv6 `auto` 设置或之前的连接进程信息猜测，也不跨 listener
+传播源 IP 的本机身份。读取 TUN 身份失败时，流量 API 保留已知本机/设备清单并返回
+`connection_error`；本机关闭连接接口以 `local_identity_unavailable` 拒绝执行，避免部分
+关闭或按错误范围操作。没有系统 TUN 连接的显式代理快照不需要额外读取 `/configs`。
 
 主出口选择当前会话累计字节最多的完整 `chains`，相同字节时再按连接数和名称稳定决胜。
 该 DTO 明确标记 `scope=active_sessions`，不表示重启后仍保留的历史流量。若 mihomo 不可用，

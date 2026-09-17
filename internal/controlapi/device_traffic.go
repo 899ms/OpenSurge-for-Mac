@@ -1,6 +1,7 @@
 package controlapi
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"sort"
@@ -69,17 +70,22 @@ func (s *Server) handleDeviceTraffic(w http.ResponseWriter, r *http.Request) {
 	}
 	connections, connectionErr := s.fetchConnections(r.Context(), cfg)
 	sampledAt := time.Now().UTC()
+	localIdentity := newGatewayLocalIdentity(cfg.Gateway.LANIP, mihomo.TUNRuntimeState{})
+	var identityErr error
+	if connectionErr == nil {
+		localIdentity, identityErr = s.fetchGatewayLocalIdentity(r.Context(), cfg, connections)
+	}
 	appliedPolicy := device.PolicySet{}
 	if cfg.Gateway.SameLAN() {
 		appliedPolicy = loadAppliedDevicePolicy(paths)
 	}
-	response := aggregateDeviceTrafficWithPolicy(leases, appliedPolicy, connections, cfg.Gateway.LANIP, cfg.Gateway.LANPrefixLen, true)
+	response := aggregateDeviceTrafficWithPolicy(leases, appliedPolicy, connections, localIdentity, cfg.Gateway.LANPrefixLen, true)
 	annotateDeviceTrafficIPv6BlockState(response.Devices, cfg.Transparent.TUNIPv6 != config.TUNIPv6Off)
 	if response.GatewayLocal.Transport == localTransportNone && cfg.Transparent.TUNEnabled() {
 		response.GatewayLocal.Transport = localTransportTUN
 	}
 	if connectionErr == nil {
-		s.trafficSampler.annotate(&response, connections, sampledAt)
+		s.trafficSampler.annotate(&response, connections, localIdentity, sampledAt)
 	} else {
 		s.trafficSampler.reset()
 	}
@@ -92,7 +98,7 @@ func (s *Server) handleDeviceTraffic(w http.ResponseWriter, r *http.Request) {
 	response.Revision = fileDigest(s.configPath)
 	response.SampledAt = sampledAt
 	response.Scope = deviceTrafficScope
-	response.ConnectionError = errorString(connectionErr)
+	response.ConnectionError = errorString(errors.Join(connectionErr, identityErr))
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -102,7 +108,7 @@ func annotateDeviceTrafficIPv6BlockState(rows []DeviceTraffic, enabled bool) {
 	}
 }
 
-func (s *trafficRateSampler) annotate(response *DeviceTrafficResponse, snapshot mihomo.ConnectionsSnapshot, sampledAt time.Time) {
+func (s *trafficRateSampler) annotate(response *DeviceTrafficResponse, snapshot mihomo.ConnectionsSnapshot, localIdentity gatewayLocalIdentity, sampledAt time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -127,8 +133,6 @@ func (s *trafficRateSampler) annotate(response *DeviceTrafficResponse, snapshot 
 	for index := range response.Devices {
 		byIP[response.Devices[index].IP] = &response.Devices[index]
 	}
-	localSources := gatewayLocalSourceIPs(snapshot, response.GatewayLocal.IP)
-
 	for _, connection := range snapshot.Connections {
 		id := strings.TrimSpace(connection.ID)
 		previous, ok := s.connections[id]
@@ -140,7 +144,7 @@ func (s *trafficRateSampler) annotate(response *DeviceTrafficResponse, snapshot 
 		response.GatewayRates.Upload += bytesPerSecond(uploadDelta, elapsed)
 		response.GatewayRates.Download += bytesPerSecond(downloadDelta, elapsed)
 
-		if isGatewayLocalConnection(connection, response.GatewayLocal.IP, localSources) {
+		if localIdentity.matches(connection) {
 			response.GatewayLocal.UploadRate += bytesPerSecond(uploadDelta, elapsed)
 			response.GatewayLocal.DownloadRate += bytesPerSecond(downloadDelta, elapsed)
 			continue
@@ -209,14 +213,14 @@ func registeredDeviceNames(policy device.PolicySet) map[string]string {
 }
 
 func aggregateDeviceTraffic(leases []device.Client, snapshot mihomo.ConnectionsSnapshot) DeviceTrafficResponse {
-	return aggregateDeviceTrafficWithPolicy(leases, device.PolicySet{}, snapshot, "", 0, false)
+	return aggregateDeviceTrafficWithPolicy(leases, device.PolicySet{}, snapshot, newGatewayLocalIdentity("", mihomo.TUNRuntimeState{}), 0, false)
 }
 
-func aggregateDeviceTrafficWithPolicy(leases []device.Client, policy device.PolicySet, snapshot mihomo.ConnectionsSnapshot, gatewayIP string, prefixLen int, observeLAN bool) DeviceTrafficResponse {
+func aggregateDeviceTrafficWithPolicy(leases []device.Client, policy device.PolicySet, snapshot mihomo.ConnectionsSnapshot, localIdentity gatewayLocalIdentity, prefixLen int, observeLAN bool) DeviceTrafficResponse {
+	gatewayIP := localIdentity.gatewayIP
 	selected := selectCurrentLeases(leases)
 	rows := make([]DeviceTraffic, 0, len(selected)+len(policy.Devices))
 	byIP := make(map[string]int, len(selected)+len(policy.Devices))
-	localSources := gatewayLocalSourceIPs(snapshot, gatewayIP)
 	gatewayLocal := DeviceTraffic{
 		IP:             normalizeTrafficIP(gatewayIP),
 		IdentitySource: identitySourceGatewayLocal,
@@ -258,7 +262,7 @@ func aggregateDeviceTrafficWithPolicy(leases []device.Client, policy device.Poli
 		})
 	}
 	for _, connection := range snapshot.Connections {
-		if isGatewayLocalConnection(connection, gatewayIP, localSources) {
+		if localIdentity.matches(connection) {
 			continue
 		}
 		sourceIP := normalizeTrafficIP(metadataString(connection.Metadata, "sourceIP"))
@@ -282,7 +286,7 @@ func aggregateDeviceTrafficWithPolicy(leases []device.Client, policy device.Poli
 	localHasExplicitProxy := false
 	unclassified := 0
 	for _, connection := range snapshot.Connections {
-		if isGatewayLocalConnection(connection, gatewayIP, localSources) {
+		if localIdentity.matches(connection) {
 			upload := nonnegativeBytes(connection.Upload)
 			download := nonnegativeBytes(connection.Download)
 			gatewayLocal.ActiveConnections++
@@ -370,41 +374,6 @@ func aggregateDeviceTrafficWithPolicy(leases []device.Client, policy device.Poli
 		// connection as unmatched. New UI code uses the explicit categories.
 		UnmatchedConnections: gatewayLocal.ActiveConnections + unclassified,
 	}
-}
-
-func gatewayLocalSourceIPs(snapshot mihomo.ConnectionsSnapshot, gatewayIP string) map[string]struct{} {
-	result := map[string]struct{}{}
-	gatewayIP = normalizeTrafficIP(gatewayIP)
-	for _, connection := range snapshot.Connections {
-		sourceIP := normalizeTrafficIP(metadataString(connection.Metadata, "sourceIP"))
-		if sourceIP == "" {
-			continue
-		}
-		if sourceIP == gatewayIP || isLoopbackIP(sourceIP) || hasLocalProcessEvidence(connection) {
-			result[sourceIP] = struct{}{}
-		}
-	}
-	return result
-}
-
-func isGatewayLocalConnection(connection mihomo.Connection, gatewayIP string, localSources map[string]struct{}) bool {
-	if hasLocalProcessEvidence(connection) {
-		return true
-	}
-	sourceIP := normalizeTrafficIP(metadataString(connection.Metadata, "sourceIP"))
-	if sourceIP == "" {
-		return false
-	}
-	if sourceIP == normalizeTrafficIP(gatewayIP) || isLoopbackIP(sourceIP) {
-		return true
-	}
-	_, exists := localSources[sourceIP]
-	return exists
-}
-
-func hasLocalProcessEvidence(connection mihomo.Connection) bool {
-	return metadataString(connection.Metadata, "process") != "" ||
-		metadataString(connection.Metadata, "processPath") != ""
 }
 
 func isLoopbackIP(value string) bool {

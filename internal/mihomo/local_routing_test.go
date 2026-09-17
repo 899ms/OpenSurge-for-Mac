@@ -114,7 +114,7 @@ func TestBuildLocalRoutingPolicyAddsOnlyEffectiveSystemTUNIPv6Identities(t *test
 				localRoutingFakeIPv6Source():    tt.wantFake,
 				localRoutingHostTUNIPv6Source(): tt.wantHost,
 			} {
-				match := "(IN-NAME," + localRoutingSystemTUNName + "),(SRC-IP-CIDR," + source + ")"
+				match := "(IN-NAME," + SystemTUNListenerName + "),(SRC-IP-CIDR," + source + ")"
 				if got := strings.Contains(rules, match); got != wanted {
 					t.Fatalf("system TUN IPv6 identity %q present = %t, want %t:\n%s", source, got, wanted, rules)
 				}
@@ -212,7 +212,7 @@ rules:
 				t.Fatal(err)
 			}
 			for _, network := range []string{"TCP", "UDP"} {
-				want := "AND,((IN-TYPE,TUN),(IN-NAME," + localRoutingSystemTUNName + "),(SRC-IP-CIDR," + tt.source + "),(NETWORK," + network + ")),open-surge/mac-mode-"
+				want := "AND,((IN-TYPE,TUN),(IN-NAME," + SystemTUNListenerName + "),(SRC-IP-CIDR," + tt.source + "),(NETWORK," + network + ")),open-surge/mac-mode-"
 				if !strings.Contains(rendered, want) {
 					t.Fatalf("rendered config missing scoped local IPv6 %s rule for %s:\n%s", network, tt.source, rendered)
 				}

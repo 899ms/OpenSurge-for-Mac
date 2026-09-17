@@ -15,6 +15,7 @@
   <p>
     <a href="https://opensurge.pages.dev/">Website</a> ·
     <a href="https://github.com/YTwsy/OpenSurge-for-Mac/releases">Download</a> ·
+    <a href="https://opensurge.pages.dev/docs/">Documentation</a> ·
     <a href="docs/app-user-guide.md">App guide</a> ·
     <a href="#capabilities">Capabilities</a> ·
     <a href="#per-device-policies">Per-device policies</a> ·
@@ -24,15 +25,16 @@
   <table width="100%">
     <tr>
       <td width="66%" valign="top">
-        <img src="docs/images/opensurge-dashboard.png" width="100%" alt="OpenSurge whole-home gateway dashboard">
+        <img src="docs/images/readme/en/dashboard.png" width="100%" alt="OpenSurge whole-home gateway dashboard">
       </td>
       <td width="34%" valign="top">
-        <img src="docs/images/opensurge-policies.png" width="100%" alt="OpenSurge policy and proxy health view">
+        <img src="docs/images/readme/en/policies.png" width="100%" alt="OpenSurge policy and proxy health view">
         <br>
-        <img src="docs/images/opensurge-devices.png" width="100%" alt="OpenSurge per-device policy view">
+        <img src="docs/images/readme/en/devices.png" width="100%" alt="OpenSurge per-device policy view">
       </td>
     </tr>
   </table>
+  <p><sub>Screenshots use isolated fictional demo data.</sub></p>
 </div>
 
 OpenSurge for Mac is an open-source, Surge-style macOS gateway and control
@@ -42,7 +44,6 @@ their gateway and DNS to the Mac. For automatic onboarding across an existing
 LAN, choose LAN DHCP takeover; for a separate AP, SSID, or VLAN, use an
 isolated downstream LAN. All three modes can optionally enable experimental downstream IPv6 takeover.
 
-
 Every mode supports independent egress policies for registered devices: use
 rule-based routing for both the phone and local Mac, route the game console
 through a US-region node, and send the TV through a streaming node. In LAN DHCP
@@ -50,16 +51,31 @@ takeover and isolated downstream-LAN modes, phones, TVs, PS5 consoles, and VR
 headsets can automatically obtain DHCP/DNS from the Mac without per-device
 gateway or DNS changes.
 
+> For feature overviews, setup instructions, and practical guides, visit the [OpenSurge website](https://opensurge.pages.dev/).
+>
+> [Features](https://opensurge.pages.dev/features/) · [Guides](https://opensurge.pages.dev/guides/) · [Documentation](https://opensurge.pages.dev/docs/)
+
+<details>
+  <summary><strong>OpenSurge in 10 images</strong></summary>
+
+  <p>Scroll horizontally to explore the full gallery.</p>
+
+  <pre><img src="docs/images/readme/gallery-en/01-home-gateway.png" width="480" alt="Your Mac as a whole-home network gateway"><img src="docs/images/readme/gallery-en/02-per-device-routing.png" width="480" alt="Independent routes for each device"><img src="docs/images/readme/gallery-en/03-network-topologies.png" width="480" alt="Three network topologies, starting with one device"><img src="docs/images/readme/gallery-en/04-prepare-policies.png" width="480" alt="Prepare and preview policies before starting the gateway"><img src="docs/images/readme/gallery-en/05-network-overview.png" width="480" alt="Gateway status, live traffic, and active devices"><img src="docs/images/readme/gallery-en/06-independent-mac-routing.png" width="480" alt="Independent routing controls for the local Mac"><img src="docs/images/readme/gallery-en/07-reusable-rules.png" width="480" alt="Reusable rule sets and routing templates"><img src="docs/images/readme/gallery-en/08-diagnostics-recovery.png" width="480" alt="Diagnostics and guided network recovery"><img src="docs/images/readme/gallery-en/09-optional-connectivity.png" width="480" alt="Optional Tailscale outbound and experimental downstream IPv6"><img src="docs/images/readme/gallery-en/10-get-opensurge.png" width="480" alt="Get OpenSurge for Mac and visit the website"></pre>
+</details>
+
 | Mode | Best for | Effect on the existing network |
 | --- | --- | --- |
 | **Same-LAN bypass-router mode (common; recommended first step)** | Starting with selected phones, TVs, game consoles, or other devices | Main-router DHCP stays enabled; selected devices use stable IPv4 addresses and manually point their gateway and DNS to the Mac |
 | **LAN DHCP takeover (advanced · automatic onboarding)** | Automatically connecting devices on the same LAN to OpenSurge | Follow the guided flow to disable main-router DHCP and restore it when stopping |
 | **Isolated downstream LAN** | A separate AP, SSID, or VLAN | Existing-LAN DHCP stays unchanged; the Mac provides DHCP/DNS and the gateway for the isolated downstream network |
 
-- Import an existing mihomo subscription. OpenSurge takes ownership only of
-  gateway-critical fields, and a separate global overlay draft keeps custom
-  proxies, providers, group extensions, and rules across subscription refreshes
-  without changing the running gateway automatically.
+- Importing a mihomo profile or subscription is optional. The **Global Profile
+  Overlay** panel, collapsed by default, can independently add proxies,
+  providers, policy groups, DNS settings, and rules. Even with the gateway
+  stopped and no imported source, preview the final composed configuration,
+  select nodes, and test latency on the Policies page, or start that same
+  configuration directly from the Web GUI. Refreshing a subscription or saving
+  a draft does not automatically change the running gateway.
 - Use the Web GUI and menu bar app to see which devices are active, how much
   traffic they are moving, and which egress chain they use.
 - Temporarily keep the Mac running with its lid closed from either UI. The
@@ -121,8 +137,8 @@ common local-network, TUN, and device configuration questions, see the
 - Attribute active-session traffic to DHCP devices or same-LAN registered and
   currently observed devices, showing per-device connection counts, live
   upload/download rates, cumulative bytes, and the dominant mihomo egress chain.
-- Test proxy-node reachability and latency in one place, then switch an applied
-  Selector from the health view.
+- Test proxy-node reachability and latency with the gateway running or stopped,
+  and switch Selectors from the final composed policy view.
 - Probe a fixed catalog of real services through the applied mihomo mixed-port
   and current local-Mac mode, showing the three-round median latency, matched
   rule, and actual egress chain.
@@ -350,6 +366,21 @@ its non-gateway DNS resolver/filter fields. Preserving fields such as
 `nameserver-policy`, `proxy-server-nameserver`, and `fake-ip-filter` keeps proxy
 server hostnames resolvable without allowing the profile to replace the
 gateway DNS listener or TUN DNS contract.
+
+Importing a profile is not required for advanced configuration. The Web GUI's
+**Global Profile Overlay** can independently add proxies, providers, manual
+policy groups, and rules to a minimal managed profile. While the gateway is
+stopped, the Policies page uses a prepared mihomo instance to show the final
+configuration, select nodes, and test latency without taking over TUN,
+DHCP/DNS, PF, or forwarding. You can also start directly from the Web GUI
+without first visiting Policies: the server composes the configuration,
+validates it with a real `mihomo -t`, then saves and starts that same candidate.
+
+Previewing, selecting nodes, and testing latency do not commit the desired
+configuration. Saving an overlay draft while the gateway is running does not
+change live traffic. An overlay-only draft takes effect on the next gateway
+start from the Web GUI; `sudo omg start` continues to use the persisted
+configuration and does not read Web GUI drafts.
 
 ```yaml
 mihomo:

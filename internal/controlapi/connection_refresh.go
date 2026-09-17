@@ -27,10 +27,12 @@ func (s *Server) handleLocalConnectionRefresh(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadGateway, "connections_unavailable", err.Error())
 		return
 	}
-	localSources := gatewayLocalSourceIPs(snapshot, cfg.Gateway.LANIP)
-	ids := matchingConnectionIDs(snapshot, func(connection mihomo.Connection) bool {
-		return isGatewayLocalConnection(connection, cfg.Gateway.LANIP, localSources)
-	})
+	localIdentity, err := s.fetchGatewayLocalIdentity(r.Context(), cfg, snapshot)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "local_identity_unavailable", err.Error())
+		return
+	}
+	ids := matchingConnectionIDs(snapshot, localIdentity.matches)
 	s.writeConnectionRefresh(w, r, cfg, connectionRefreshScopeLocal, "", ids)
 }
 

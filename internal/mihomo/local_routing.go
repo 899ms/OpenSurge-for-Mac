@@ -20,8 +20,10 @@ const (
 	LocalRoutingUDPGroup    = "open-surge/mac-mode-udp"
 	LocalRoutingGroupPrefix = "open-surge/mac-"
 
-	localRoutingTUNSource     = "198.18.0.1/32"
-	localRoutingSystemTUNName = "DEFAULT-TUN"
+	localRoutingTUNSource = "198.18.0.1/32"
+	// SystemTUNListenerName is the inbound name assigned to Mihomo's top-level
+	// TUN, shared by Mac-local routing and connection ownership checks.
+	SystemTUNListenerName = "DEFAULT-TUN"
 )
 
 var localRoutingIPv6DestinationCIDRs = []string{
@@ -348,7 +350,7 @@ func localRoutingSystemTUNIPv6Inbound(source string) localRoutingInbound {
 	return localRoutingInbound{
 		match: []string{
 			"IN-TYPE,TUN",
-			"IN-NAME," + localRoutingSystemTUNName,
+			"IN-NAME," + SystemTUNListenerName,
 			"SRC-IP-CIDR," + source,
 		},
 		ipv6: true,

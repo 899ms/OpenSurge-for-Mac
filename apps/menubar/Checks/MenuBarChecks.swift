@@ -133,7 +133,7 @@ struct MenuBarChecks {
         CheckURLProtocol.handler = { request in
             try require(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-token", "status bearer token missing")
             try require(request.url?.path == "/api/v1/menubar", "status path mismatch")
-            let body = #"{"schema_version":1,"revision":"r1","gateway":"running","topology":"same_wifi_dhcp","lan_ip":"192.168.1.20","dhcp":"running","mihomo":"running","pf_anchor":"loaded","forwarding":"enabled","client_count":2,"drift":false,"doctor_healthy":true,"recovery_required":false,"warnings":[]}"#
+            let body = #"{"schema_version":1,"revision":"r1","gateway":"running","topology":"same_wifi_dhcp","lan_ip":"192.168.1.20","dhcp":"running","mihomo":"running","pf_anchor":"loaded","forwarding":"enabled","ipv4_takeover":"ready","ipv6_takeover":"waiting","client_count":2,"drift":false,"doctor_healthy":true,"recovery_required":false,"warnings":[]}"#
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(body.utf8))
         }
         let status: MenuBarStatus
@@ -145,6 +145,7 @@ struct MenuBarChecks {
         try require(IndicatorState.connecting.usesBrandMenuBarIcon && IndicatorState.connecting.menuBarIconOpacity == 0.75, "connecting indicator must use the brand icon")
         try require(IndicatorState.unreachable.usesBrandMenuBarIcon && IndicatorState.unreachable.menuBarIconOpacity == 0.35, "initial Control Service delay must not restore the legacy-looking icon")
         try require(status.topologyLabel == "局域网 DHCP 接管", "DHCP takeover topology label mismatch")
+        try require(status.ipv4TakeoverState == "ready" && status.ipv6TakeoverState == "waiting", "family takeover states mismatch")
         try require(status.gatewayServicesActive && menuBarQuitWarning(for: status).contains("都不会停止"), "active gateway quit warning mismatch")
         try require(status.diagnosticSummary.contains("PF: loaded"), "diagnostic summary omitted PF")
 

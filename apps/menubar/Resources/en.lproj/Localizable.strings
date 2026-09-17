@@ -74,7 +74,13 @@
 "网关" = "Gateway";
 "拓扑" = "Topology";
 "客户端" = "Clients";
-"IPv4 转发" = "IPv4 Forwarding";
+"IPv4 接管" = "IPv4 Takeover";
+"IPv6 接管" = "IPv6 Takeover";
+"正在接管" = "Taking Over";
+"等待上游 IPv6" = "Waiting for Upstream IPv6";
+"已关闭" = "Disabled";
+"运行异常" = "Degraded";
+"重启后待清理" = "Cleanup Required After Restart";
 "运行中" = "Running";
 "已停止" = "Stopped";
 "异常" = "Degraded";

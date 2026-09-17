@@ -20,8 +20,8 @@ func TestLocalConnectionRefreshClosesOnlyGatewayLocalConnections(t *testing.T) {
 	server := newTestServer(t)
 	server.fetchConnections = func(context.Context, config.Config) (mihomo.ConnectionsSnapshot, error) {
 		return mihomo.ConnectionsSnapshot{Connections: []mihomo.Connection{
-			{ID: "local-process", Metadata: map[string]any{"sourceIP": "198.18.0.1", "type": "Tun", "process": "Safari"}},
-			{ID: "local-shared-source", Metadata: map[string]any{"sourceIP": "198.18.0.1", "type": "Tun"}},
+			{ID: "local-tcp", Metadata: map[string]any{"sourceIP": "198.18.0.1", "type": "Tun", "inboundName": mihomo.SystemTUNListenerName}},
+			{ID: "local-udp", Metadata: map[string]any{"sourceIP": "198.18.0.1", "type": "Tun", "inboundName": mihomo.SystemTUNListenerName}},
 			{ID: "local-loopback", Metadata: map[string]any{"sourceIP": "127.0.0.1", "type": "Mixed"}},
 			{ID: "local-gateway", Metadata: map[string]any{"sourceIP": "192.168.1.20"}},
 			{ID: "downstream", Metadata: map[string]any{"sourceIP": "192.168.1.151"}},
@@ -37,7 +37,7 @@ func TestLocalConnectionRefreshClosesOnlyGatewayLocalConnections(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("refresh local connections status=%d body=%s", response.Code, response.Body.String())
 	}
-	if !reflect.DeepEqual(closedIDs, []string{"local-process", "local-shared-source", "local-loopback", "local-gateway"}) {
+	if !reflect.DeepEqual(closedIDs, []string{"local-tcp", "local-udp", "local-loopback", "local-gateway"}) {
 		t.Fatalf("closed IDs = %#v", closedIDs)
 	}
 	var payload ConnectionRefreshResponse

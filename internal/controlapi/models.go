@@ -73,6 +73,8 @@ type MenuBarStatus struct {
 	TUNError        string                `json:"tun_error,omitempty"`
 	PFAnchor        string                `json:"pf_anchor"`
 	Forwarding      string                `json:"forwarding"`
+	IPv4Takeover    string                `json:"ipv4_takeover"`
+	IPv6Takeover    string                `json:"ipv6_takeover"`
 	ClientCount     int                   `json:"client_count"`
 	Drift           bool                  `json:"drift"`
 	DoctorHealthy   bool                  `json:"doctor_healthy"`
