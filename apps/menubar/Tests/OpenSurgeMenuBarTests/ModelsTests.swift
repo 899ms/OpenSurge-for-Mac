@@ -127,6 +127,21 @@ final class ModelsTests: XCTestCase {
         XCTAssertFalse(stopped.gatewayServicesActive)
         XCTAssertTrue(stopped.canQuitOpenSurge)
         XCTAssertTrue(stopped.canUninstall)
+        XCTAssertEqual(stopped.ipv4TakeoverState, "stopped")
+        XCTAssertEqual(stopped.ipv6TakeoverState, "unknown")
+    }
+
+    func testExplicitTakeoverStatesOverrideLegacyFallbacks() {
+        let status = MenuBarStatus(schemaVersion: 1, revision: "r", gateway: "running", topology: "isolated_lan",
+                                   lanIp: "192.168.50.1", dhcp: "running", mihomo: "running", pfAnchor: "loaded",
+                                   forwarding: "enabled", ipv4Takeover: "ready", ipv6Takeover: "waiting",
+                                   clientCount: 1, drift: false, doctorHealthy: true,
+                                   recoveryRequired: false, recoveryStage: nil, warnings: [], errorCode: nil)
+
+        XCTAssertEqual(status.ipv4TakeoverState, "ready")
+        XCTAssertEqual(status.ipv6TakeoverState, "waiting")
+        XCTAssertTrue(status.diagnosticSummary.contains("IPv4 takeover: ready"))
+        XCTAssertTrue(status.diagnosticSummary.contains("IPv6 takeover: waiting"))
     }
 
     func testUninstallOnlyDependsOnGatewayBeingStopped() {

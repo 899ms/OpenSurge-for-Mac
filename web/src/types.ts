@@ -12,6 +12,8 @@ export type GatewayStatus = {
   tun_error?: string
   pf_anchor: string
   forwarding: string
+  ipv4_takeover: TakeoverState
+  ipv6_takeover: TakeoverState
   dns_ipv6: boolean
   tun_ipv6_requested: 'off' | 'auto' | 'always'
   ipv6_packet: 'disabled' | 'stopped' | 'ready' | 'failed'
@@ -19,6 +21,8 @@ export type GatewayStatus = {
   ipv6_reason?: string
   client_count: number
 }
+
+export type TakeoverState = 'ready' | 'waiting' | 'stopped' | 'disabled' | 'failed' | 'interrupted'
 
 export type DoctorCheck = { name: string; ok: boolean; message?: string }
 export type DoctorRunStatus = {

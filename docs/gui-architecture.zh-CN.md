@@ -170,6 +170,11 @@ URL，先保存 SHA-256 标识的只读快照，再检查 profile inventory 和�
 总览的 GATEWAY 卡片是网关身份和配置上下文的唯一入口：接口、LAN IPv4、当前配置的
 topology 与 desired/applied 状态都在卡内展示，不另设重复的信息条。`GET /api/v1/overview`
 直接返回当前配置的 `topology`，不能用只在恢复流程中落盘的 `recovery.topology` 代替。
+卡片的地址族状态统一使用“IPv4 接管”和“IPv6 接管”：前者组合当前 runtime、PF anchor
+和系统 IPv4 forwarding 判断 OpenSurge 是否实际拥有运行路径，不能因宿主预先开启
+forwarding 就显示为正在接管；后者反映 BPF broker 与 patched Mihomo 用户态 packet path，
+并保留自动模式等待原生上游 IPv6 的独立状态。原始 forwarding 与 IPv6 runtime 字段仍供
+CLI、诊断和网络设置页使用。
 总览页标题区的“启动网关”或“停止网关”只是进入“网络设置”的上下文入口，不直接调用
 gateway start/stop API；实际动作必须留在网络页，让用户先看到 topology、计划 blocker、
 DHCP 接管与恢复状态后再确认。

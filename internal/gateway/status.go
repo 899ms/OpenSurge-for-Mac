@@ -28,6 +28,8 @@ type Status struct {
 	TUNError            string `json:"tun_error,omitempty"`
 	PFAnchor            string `json:"pf_anchor"`
 	Forwarding          string `json:"forwarding"`
+	IPv4Takeover        string `json:"ipv4_takeover"`
+	IPv6Takeover        string `json:"ipv6_takeover"`
 	ClientCount         int    `json:"client_count"`
 	DNSIPv6             bool   `json:"dns_ipv6"`
 	TUNIPv6Requested    string `json:"tun_ipv6_requested"`
@@ -144,6 +146,8 @@ func (m Manager) Status(ctx context.Context) (Status, error) {
 	if current, err := sysctl.New().Current(); err == nil {
 		forwarding = sysctl.FormatForwarding(current)
 	}
+	ipv4Takeover := deriveIPv4Takeover(gatewayStatus, runtimeState, pfStatus, forwarding)
+	ipv6Takeover := deriveIPv6Takeover(gatewayStatus, runtimeState, tunIPv6Requested, ipv6PacketStatus, ipv6Reason)
 
 	return Status{
 		Gateway:             gatewayStatus,
@@ -159,6 +163,8 @@ func (m Manager) Status(ctx context.Context) (Status, error) {
 		TUNError:            tunError,
 		PFAnchor:            pfStatus,
 		Forwarding:          forwarding,
+		IPv4Takeover:        ipv4Takeover,
+		IPv6Takeover:        ipv6Takeover,
 		ClientCount:         len(clients),
 		DNSIPv6:             dnsIPv6,
 		TUNIPv6Requested:    tunIPv6Requested,
@@ -166,6 +172,49 @@ func (m Manager) Status(ctx context.Context) (Status, error) {
 		NativeIPv6Available: nativeIPv6Available,
 		IPv6Reason:          ipv6Reason,
 	}, nil
+}
+
+func deriveIPv4Takeover(gatewayStatus, runtimeState, pfStatus, forwarding string) string {
+	if runtimeState == "interrupted" {
+		return "interrupted"
+	}
+	if gatewayStatus == "stopped" {
+		return "stopped"
+	}
+	if gatewayStatus == "running" && runtimeState == "active" && pfStatus == "loaded" && forwarding == "enabled" {
+		return "ready"
+	}
+	return "failed"
+}
+
+func deriveIPv6Takeover(gatewayStatus, runtimeState, requested, packetStatus, reason string) string {
+	disabled := requested == config.TUNIPv6Off && packetStatus == "disabled"
+	enabled := requested == config.TUNIPv6Auto || requested == config.TUNIPv6Always
+	if disabled {
+		return "disabled"
+	}
+	if runtimeState == "interrupted" {
+		return "interrupted"
+	}
+	if gatewayStatus == "stopped" {
+		if enabled {
+			return "stopped"
+		}
+		return "failed"
+	}
+	if gatewayStatus != "running" || runtimeState != "active" {
+		return "failed"
+	}
+	if !enabled || packetStatus == "disabled" {
+		return "failed"
+	}
+	if packetStatus == "ready" {
+		return "ready"
+	}
+	if requested == config.TUNIPv6Auto && packetStatus == "stopped" && reason == "native_ipv6_unavailable" {
+		return "waiting"
+	}
+	return "failed"
 }
 
 type versionResult struct {

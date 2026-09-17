@@ -145,7 +145,7 @@ const overview: Overview = {
   warnings: [],
   status: {
     gateway: 'stopped', interface: 'en0', lan_ip: '192.168.1.20', dhcp: 'stopped',
-    dhcp_enabled: true, mihomo: 'stopped', pf_anchor: 'unloaded', forwarding: 'disabled',
+    dhcp_enabled: true, mihomo: 'stopped', pf_anchor: 'unloaded', forwarding: 'disabled', ipv4_takeover: 'stopped', ipv6_takeover: 'disabled',
     dns_ipv6: false, tun_ipv6_requested: 'off', ipv6_packet: 'disabled', native_ipv6_available: false, client_count: 0,
   },
   doctor: [], doctor_healthy: true, leases: [], policies: [],
@@ -294,6 +294,11 @@ describe('OpenSurge app shell', () => {
     expect(within(gateway).getByText('en0 · 192.168.1.20')).toBeTruthy()
     expect(within(gateway).getByText('接管模式')).toBeTruthy()
     expect(within(gateway).getByText('配置状态')).toBeTruthy()
+    const ipv4Takeover = within(gateway).getByText('IPv4 接管').closest('.gateway-service-state')
+    const ipv6Takeover = within(gateway).getByText('IPv6 接管').closest('.gateway-service-state')
+    expect(ipv4Takeover?.textContent).toContain('已停止')
+    expect(ipv6Takeover?.textContent).toContain('已关闭')
+    expect(within(gateway).queryByText('IPv4 转发')).toBeNull()
     expect(screen.getByRole('img', { name: '上传最近 60 秒趋势' }).querySelector('.rate-line')?.getAttribute('d')).toContain(' C ')
     expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.getByRole('button', { name: '启动网关' }).hasAttribute('disabled')).toBe(false)

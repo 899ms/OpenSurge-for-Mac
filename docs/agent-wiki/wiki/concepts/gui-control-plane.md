@@ -148,6 +148,13 @@ Service。只有卸载、重新安装或修改系统级 Helper 才进入需要�
 因此 raw `forwarding == enabled` 不能单独算作 OpenSurge 服务仍活跃，也不能阻止完整退出
 或卸载。gateway manager 仍必须记录并恢复启动前 forwarding 值。
 
+菜单栏与 Web GUI 总览用“IPv4 接管”和“IPv6 接管”展示按地址族归一化后的运行状态，
+不能把 raw forwarding 直接改名成 IPv4 接管。IPv4 只有在当前 boot 的 gateway runtime
+active、PF anchor loaded、forwarding enabled 且整体 gateway running 时才显示正在接管；
+停止态即使宿主原本已经启用 forwarding 也显示已停止。IPv6 接管来自用户态 packet path，
+区分正在接管、自动模式等待上游、已关闭、已停止、异常与重启后待清理。底层
+`forwarding`、`ipv6_packet`、`native_ipv6_available` 和 `ipv6_reason` 继续保留用于诊断。
+
 菜单栏提供独立“卸载 OpenSurge”入口。卸载只以 `gateway == stopped` 为门禁，不受
 recovery 阶段影响；确认窗口允许保留配置/订阅/策略数据或彻底删除全部数据。管理员授权
 后只调用 pkg 安装到固定系统目录、root 拥有的卸载脚本；脚本必须自行再次确认 gateway
