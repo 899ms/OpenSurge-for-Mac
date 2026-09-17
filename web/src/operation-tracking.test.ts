@@ -97,6 +97,33 @@ describe('operation tracking and shared polling', () => {
     expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
   })
 
+  it.each([
+    { kind: 'dhcp-probe', path: '/api/v1/network/dhcp-probe', submit: api.probeDHCP, state: 'succeeded', status: 200 },
+    { kind: 'router-dhcp-restored', path: '/api/v1/recovery/router-restored', submit: api.confirmRouterRestored, state: 'failed', status: 409 },
+  ])('tracks $kind while the OFFER probe is pending and records its response', async ({ kind, path, submit, state, status }) => {
+    let finish!: (value: Response) => void
+    let id = ''
+    let completed = false
+    const error = 'no DHCP server answered after the router was marked restored'
+    const fetcher = vi.fn((url: string, init?: RequestInit): Promise<Response> => {
+      if (url === path) {
+        id = (init?.headers as Record<string, string>)['X-OpenSurge-Operation-ID']
+        return new Promise(resolve => { finish = resolve })
+      }
+      return Promise.resolve(response({ id, kind, state: completed ? state : 'running', phase: 'probing_dhcp', ...(completed && state === 'failed' ? { error } : {}) }))
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const result = submit().catch(cause => cause)
+    expect(getOperation(id)?.phase).toBe('submitting')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(getOperation(id)).toMatchObject({ kind, state: 'running', phase: 'probing_dhcp', connection: 'connected' })
+    completed = true
+    finish(response(state === 'succeeded' ? { recovery: { stage: 'router_dhcp_disabled_confirmed' } } : { error: { code: 'router_dhcp_missing', message: error } }, status))
+    await result
+    expect(getOperation(id)).toMatchObject({ state, ...(state === 'failed' ? { error } : {}) })
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
+  })
+
   it('labels a read timeout as unknown, not a failed gateway action', async () => {
     const id = `timeout-${++sequence}`
     recordOperation({ id, kind: 'reload', state: 'running', phase: 'stopping_mihomo', created_at: new Date().toISOString() })

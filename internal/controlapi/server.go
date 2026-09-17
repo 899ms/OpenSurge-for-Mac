@@ -1393,20 +1393,30 @@ func (s *Server) handleDHCPProbe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "recovery_precondition", "Mac static IPv4 must be applied before probing for router DHCP")
 		return
 	}
-	servers, err := s.networkRunner.ProbeDHCP(r.Context(), s.configPath, cfg.Gateway.Interface, 3*time.Second)
+	ctx, operation, ok := s.beginRequestOperation(w, r, "dhcp-probe")
+	if !ok {
+		return
+	}
+	gateway.ReportProgress(ctx, "probing_dhcp")
+	servers, err := s.networkRunner.ProbeDHCP(ctx, s.configPath, cfg.Gateway.Interface, 3*time.Second)
 	if err != nil {
+		s.finishOperation(operation, err)
 		writeError(w, http.StatusBadGateway, "dhcp_probe_failed", err.Error())
 		return
 	}
 	if len(servers) > 0 {
-		writeError(w, http.StatusConflict, "competing_dhcp", "DHCP server is still answering: "+strings.Join(servers, ", "))
+		err := fmt.Errorf("DHCP server is still answering: %s", strings.Join(servers, ", "))
+		s.finishOperation(operation, err)
+		writeError(w, http.StatusConflict, "competing_dhcp", err.Error())
 		return
 	}
 	state.Stage, state.Required = RecoveryRouterDHCPDisabledConfirmed, true
 	if err := s.store.SaveRecovery(state); err != nil {
+		s.finishOperation(operation, err)
 		writeError(w, http.StatusInternalServerError, "recovery_write_failed", err.Error())
 		return
 	}
+	s.finishOperation(operation, nil)
 	writeJSON(w, http.StatusOK, NetworkActionResponse{SchemaVersion: SchemaVersion, Recovery: state, DHCPServers: []string{}})
 }
 
@@ -1416,20 +1426,30 @@ func (s *Server) handleRouterRestored(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "recovery_precondition", "stop OpenSurge before verifying restored router DHCP")
 		return
 	}
-	servers, err := s.networkRunner.ProbeDHCP(r.Context(), s.configPath, state.NetworkSnapshot.Interface, 3*time.Second)
+	ctx, operation, ok := s.beginRequestOperation(w, r, "router-dhcp-restored")
+	if !ok {
+		return
+	}
+	gateway.ReportProgress(ctx, "probing_dhcp")
+	servers, err := s.networkRunner.ProbeDHCP(ctx, s.configPath, state.NetworkSnapshot.Interface, 3*time.Second)
 	if err != nil {
+		s.finishOperation(operation, err)
 		writeError(w, http.StatusBadGateway, "dhcp_probe_failed", err.Error())
 		return
 	}
 	if len(servers) == 0 {
-		writeError(w, http.StatusConflict, "router_dhcp_missing", "no DHCP server answered after the router was marked restored")
+		err := errors.New("no DHCP server answered after the router was marked restored")
+		s.finishOperation(operation, err)
+		writeError(w, http.StatusConflict, "router_dhcp_missing", err.Error())
 		return
 	}
 	state.Stage, state.Required = RecoveryRouterDHCPRestored, true
 	if err := s.store.SaveRecovery(state); err != nil {
+		s.finishOperation(operation, err)
 		writeError(w, http.StatusInternalServerError, "recovery_write_failed", err.Error())
 		return
 	}
+	s.finishOperation(operation, nil)
 	writeJSON(w, http.StatusOK, NetworkActionResponse{SchemaVersion: SchemaVersion, Recovery: state, DHCPServers: servers})
 }
 
