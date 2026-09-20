@@ -77,6 +77,14 @@ func RenderConfig(cfg config.Config, paths runtime.Paths) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	leaseFile, err := absoluteDNSMasqPath(paths.LeaseFile)
+	if err != nil {
+		return "", err
+	}
+	pidFile, err := absoluteDNSMasqPath(paths.DNSMasqPIDFile)
+	if err != nil {
+		return "", err
+	}
 	var reservations []device.Reservation
 	bundle := cfg.DevicePolicy.Bundle
 	if bundle == nil && cfg.DevicePolicy.File != "" {
@@ -119,8 +127,8 @@ func RenderConfig(cfg config.Config, paths runtime.Paths) (string, error) {
 		BypassDNS:           strings.Join(cfg.DHCP.BypassDNS, ","),
 		RouterBypassEnabled: routerBypassEnabled,
 		Domain:              cfg.DHCP.Domain,
-		LeaseFile:           paths.LeaseFile,
-		PIDFile:             paths.DNSMasqPIDFile,
+		LeaseFile:           leaseFile,
+		PIDFile:             pidFile,
 		DNSPort:             cfg.DNS.Port,
 		DNSListen:           cfg.DNS.Listen,
 		DNSUpstream:         dnsUpstream,
