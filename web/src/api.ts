@@ -1,4 +1,4 @@
-import type { APIError, ConnectionRefreshResult, ConnectivityResponse, ControlConfig, DevicePolicyDocument, DevicesResponse, DeviceTraffic, Diagnostics, DoctorRunStatus, GatewayPlan, LocalRouting, LocalRoutingMode, NetworkDefaults, NetworkInterfacesResponse, Operation, Overview, PolicySet, PolicyWorkspaceRequest, PolicyWorkspaceSnapshot, ProfileOverlay, ProfileOverlayDocument, ProfileOverlayPreview, ProxyGroup, ProxyHealthSnapshot, ProxyHealthTestResponse, SleepPreventionStatus, Source, SourceSnapshotFile, TailscaleDiscoveryResponse, TailscaleResponse, TailscaleUpdate, UIPreferences } from './types'
+import type { APIError, ConnectionObservation, ConnectionRefreshResult, ConnectivityResponse, ControlConfig, DevicePolicyDocument, DevicesResponse, DeviceTraffic, Diagnostics, DoctorRunStatus, GatewayPlan, LocalRouting, LocalRoutingMode, NetworkDefaults, NetworkInterfacesResponse, Operation, Overview, PolicySet, PolicyWorkspaceRequest, PolicyWorkspaceSnapshot, ProfileOverlay, ProfileOverlayDocument, ProfileOverlayPreview, ProxyGroup, ProxyHealthSnapshot, ProxyHealthTestResponse, SleepPreventionStatus, Source, SourceSnapshotFile, TailscaleDiscoveryResponse, TailscaleResponse, TailscaleUpdate, UIPreferences } from './types'
 import { getOperation, markOperationConnection, operationStatusUnknownMessage, recordOperation } from './operations'
 
 export class RequestError extends Error {
@@ -79,6 +79,7 @@ export const api = {
 	sourcePreview: (id: string) => request<ProfileOverlayPreview>(`/api/v1/sources/${encodeURIComponent(id)}/preview`),
   devices: () => request<DevicesResponse>('/api/v1/devices'),
   deviceTraffic: () => request<DeviceTraffic>('/api/v1/device-traffic'),
+  connections: (signal?: AbortSignal) => request<ConnectionObservation>('/api/v1/connections', { signal }),
   devicePolicy: () => request<DevicePolicyDocument>('/api/v1/device-policy'),
   saveDevicePolicy: (policy: PolicySet, revision: string) => trackedRequest<DevicePolicyDocument>('save-device-policy', '/api/v1/device-policy', { method: 'PUT', headers: { 'If-Match': `"${revision}"` }, body: JSON.stringify(policy) }),
   policies: () => request<{ groups: ProxyGroup[] }>('/api/v1/policies'),

@@ -8,7 +8,7 @@ import { useDeviceTraffic } from '../hooks/useDeviceTraffic'
 import type { Overview } from '../types'
 import { t } from '../i18n'
 
-export function DashboardPage({ overview, onOpenNetwork }: { overview: Overview | null; onOpenNetwork: (action: 'start' | 'stop' | 'cleanup') => void }) {
+export function DashboardPage({ overview, onOpenNetwork, onOpenConnections }: { overview: Overview | null; onOpenConnections?: (owner?: string) => void; onOpenNetwork: (action: 'start' | 'stop' | 'cleanup') => void }) {
   const running = overview?.status.gateway === 'running' || overview?.status.gateway === 'degraded'
   const stopped = overview?.status.gateway === 'stopped'
   const interrupted = overview?.status.runtime_state === 'interrupted'
@@ -28,6 +28,6 @@ export function DashboardPage({ overview, onOpenNetwork }: { overview: Overview 
       <ActivityCard traffic={traffic} />
       <TrafficTrendCard title="流量趋势" subtitle="网关全部 mihomo 活跃连接 · 近 60 秒内存采样" history={history} className="gateway-trend-card" />
     </section>
-    <DeviceTrafficPanel gateway={overview?.status.gateway} traffic={traffic} history={history} error={error} />
+    <DeviceTrafficPanel onOpenConnections={onOpenConnections} gateway={overview?.status.gateway} traffic={traffic} history={history} error={error} />
   </>
 }

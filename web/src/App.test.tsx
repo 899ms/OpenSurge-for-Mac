@@ -114,6 +114,7 @@ vi.mock('./api', () => ({
     revealSourceSnapshot: vi.fn(),
     exportSourceSnapshot: vi.fn(),
     devices: vi.fn(async () => ({ devices: [], leases: [], drift: false, applied: false })),
+    connections: vi.fn(),
     deviceTraffic: vi.fn(async () => ({ schema_version: 1, revision: 'r', sampled_at: '2026-07-13T00:00:00Z', scope: 'active_sessions', gateway_local: { ip: '192.168.1.20', mac: '', online: false, active_connections: 0, upload: 0, download: 0, upload_rate: 0, download_rate: 0, identity_source: 'gateway_local', transport: 'tun' }, devices: [], totals: { devices: 0, active_connections: 0, upload: 0, download: 0, upload_rate: 0, download_rate: 0 }, gateway_rates: { upload: 0, download: 0 }, unidentified_device_connections: 0, unclassified_connections: 0, unmatched_connections: 0 })),
     policies: vi.fn(async () => ({ groups: [] })),
     policyWorkspace: vi.fn(async () => ({ schema_version: 1, mode: 'prepared', revision: 'workspace-1', groups: [], health: { schema_version: 1, test_url: 'https://www.gstatic.com/generate_204', proxies: [] } })),
@@ -707,7 +708,7 @@ describe('OpenSurge app shell', () => {
     expect(screen.getByText('累计 96 KB')).toBeTruthy()
     expect(screen.getByText('累计 412 MB')).toBeTruthy()
     expect(screen.getAllByText('123 kB/s').length).toBeGreaterThan(0)
-    expect(screen.getByText(/合计 2 台设备接入 · 4 个连接/)).toBeTruthy()
+    expect(screen.getByText(/下游设备 2 台 · 4 个连接/)).toBeTruthy()
     expect(screen.getByText(/1 个待识别设备连接/)).toBeTruthy()
     expect(screen.getByText(/1 个连接无法判断来源/)).toBeTruthy()
     expect(screen.getByText('本机连接')).toBeTruthy()
@@ -799,6 +800,26 @@ describe('OpenSurge app shell', () => {
     await userEvent.click(screen.getByRole('button', { name: '连通性' }))
     expect(screen.getByRole('heading', { name: '分流与网络连通性' })).toBeTruthy()
     expect(window.location.pathname).toBe('/connectivity')
+  })
+
+  it('opens Connections from the dashboard and preserves its device, filters and scroll when returning', async () => {
+    const traffic = await api.deviceTraffic()
+    vi.mocked(api.connections).mockResolvedValue({ ...traffic, gateway_totals: traffic.totals, unclassified: { ...traffic.gateway_local, key: 'unclassified', identity_source: 'unclassified' }, connections: [] })
+    render(<App />)
+    await userEvent.click(await screen.findByRole('button', { name: '查看全部连接' }))
+    expect(window.location.pathname).toBe('/connections')
+    await userEvent.click(await screen.findByRole('button', { name: '查看 本机 Mac 的连接' }))
+    await userEvent.type(screen.getByRole('searchbox'), 'example')
+    fireEvent.change(screen.getByLabelText('来源地址族'), { target: { value: 'ipv6' } })
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 420 })
+    await userEvent.click(screen.getByRole('button', { name: '总览' }))
+    await userEvent.click(screen.getByRole('button', { name: '连接' }))
+    expect((await screen.findByRole('searchbox') as HTMLInputElement).value).toBe('example')
+    expect((screen.getByLabelText('来源地址族') as HTMLSelectElement).value).toBe('ipv6')
+    expect(screen.getByRole('button', { name: '查看 本机 Mac 的连接' }).getAttribute('aria-pressed')).toBe('true')
+    expect(new URLSearchParams(window.location.search).get('owner')).toBe('gateway-local')
+    await waitFor(() => expect(scrollTo).toHaveBeenLastCalledWith({ top: 420, behavior: 'instant' }))
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 })
   })
 
   it('shows, links, downloads, and can discard the prepared recovery card', async () => {

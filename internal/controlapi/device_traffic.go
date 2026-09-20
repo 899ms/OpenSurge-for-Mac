@@ -1,7 +1,6 @@
 package controlapi
 
 import (
-	"errors"
 	"net"
 	"net/http"
 	"sort"
@@ -9,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"open-mihomo-gateway/internal/config"
 	"open-mihomo-gateway/internal/device"
 	"open-mihomo-gateway/internal/lan"
 	"open-mihomo-gateway/internal/macosnetwork"
@@ -57,49 +55,7 @@ func newTrafficRateSampler() *trafficRateSampler {
 }
 
 func (s *Server) handleDeviceTraffic(w http.ResponseWriter, r *http.Request) {
-	cfg, err := config.LoadRuntime(s.configPath)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "config_invalid", err.Error())
-		return
-	}
-	paths := runtime.NewPaths(cfg)
-	leases, err := device.LoadLeases(paths.LeaseFile)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "leases_unavailable", err.Error())
-		return
-	}
-	connections, connectionErr := s.fetchConnections(r.Context(), cfg)
-	sampledAt := time.Now().UTC()
-	localIdentity := newGatewayLocalIdentity(cfg.Gateway.LANIP, mihomo.TUNRuntimeState{})
-	var identityErr error
-	if connectionErr == nil {
-		localIdentity, identityErr = s.fetchGatewayLocalIdentity(r.Context(), cfg, connections)
-	}
-	appliedPolicy := device.PolicySet{}
-	if cfg.Gateway.SameLAN() {
-		appliedPolicy = loadAppliedDevicePolicy(paths)
-	}
-	response := aggregateDeviceTrafficWithPolicy(leases, appliedPolicy, connections, localIdentity, cfg.Gateway.LANPrefixLen, true)
-	annotateDeviceTrafficIPv6BlockState(response.Devices, cfg.Transparent.TUNIPv6 != config.TUNIPv6Off)
-	if response.GatewayLocal.Transport == localTransportNone && cfg.Transparent.TUNEnabled() {
-		response.GatewayLocal.Transport = localTransportTUN
-	}
-	if connectionErr == nil {
-		s.trafficSampler.annotate(&response, connections, localIdentity, sampledAt)
-	} else {
-		s.trafficSampler.reset()
-	}
-	if cfg.DevicePolicy.File != "" {
-		if bundle, policyErr := device.LoadPolicyBundle(cfg.DevicePolicy.File); policyErr == nil {
-			annotateRegisteredDeviceNames(&response, bundle.Policy)
-		}
-	}
-	response.SchemaVersion = SchemaVersion
-	response.Revision = fileDigest(s.configPath)
-	response.SampledAt = sampledAt
-	response.Scope = deviceTrafficScope
-	response.ConnectionError = errorString(errors.Join(connectionErr, identityErr))
-	writeJSON(w, http.StatusOK, response)
+	s.handleConnectionObservation(w, r, false)
 }
 
 func annotateDeviceTrafficIPv6BlockState(rows []DeviceTraffic, enabled bool) {
@@ -108,60 +64,46 @@ func annotateDeviceTrafficIPv6BlockState(rows []DeviceTraffic, enabled bool) {
 	}
 }
 
-func (s *trafficRateSampler) annotate(response *DeviceTrafficResponse, snapshot mihomo.ConnectionsSnapshot, localIdentity gatewayLocalIdentity, sampledAt time.Time) {
+func (s *trafficRateSampler) annotate(response *DeviceTrafficResponse, snapshot mihomo.ConnectionsSnapshot, _ gatewayLocalIdentity, sampledAt time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
 	current := make(map[string]trafficConnectionCounters, len(snapshot.Connections))
 	for _, connection := range snapshot.Connections {
 		if id := strings.TrimSpace(connection.ID); id != "" {
-			current[id] = trafficConnectionCounters{
-				upload:   nonnegativeBytes(connection.Upload),
-				download: nonnegativeBytes(connection.Download),
+			current[id] = trafficConnectionCounters{upload: nonnegativeBytes(connection.Upload), download: nonnegativeBytes(connection.Download)}
+		}
+	}
+	response.connectionRates = make([]TrafficRates, len(snapshot.Connections))
+	elapsed := sampledAt.Sub(s.sampledAt)
+	if !s.sampledAt.IsZero() && elapsed > 0 && elapsed <= maxTrafficSampleGap {
+		byKey := map[string]*DeviceTraffic{gatewayLocalOwner: &response.GatewayLocal, unclassifiedOwner: &response.Unclassified}
+		for index := range response.Devices {
+			byKey[response.Devices[index].Key] = &response.Devices[index]
+		}
+		for index, connection := range snapshot.Connections {
+			previous, ok := s.connections[strings.TrimSpace(connection.ID)]
+			if !ok {
+				continue
+			}
+			rates := TrafficRates{Upload: bytesPerSecond(counterDelta(connection.Upload, previous.upload), elapsed), Download: bytesPerSecond(counterDelta(connection.Download, previous.download), elapsed)}
+			response.connectionRates[index] = rates
+			response.GatewayRates.Upload += rates.Upload
+			response.GatewayRates.Download += rates.Download
+			if index < len(response.connectionOwners) {
+				if row := byKey[response.connectionOwners[index]]; row != nil {
+					row.UploadRate += rates.Upload
+					row.DownloadRate += rates.Download
+				}
 			}
 		}
 	}
-
-	elapsed := sampledAt.Sub(s.sampledAt)
-	if s.sampledAt.IsZero() || elapsed <= 0 || elapsed > maxTrafficSampleGap {
-		s.sampledAt = sampledAt
-		s.connections = current
-		return
-	}
-
-	byIP := make(map[string]*DeviceTraffic, len(response.Devices))
-	for index := range response.Devices {
-		byIP[response.Devices[index].IP] = &response.Devices[index]
-	}
-	for _, connection := range snapshot.Connections {
-		id := strings.TrimSpace(connection.ID)
-		previous, ok := s.connections[id]
-		if id == "" || !ok {
-			continue
-		}
-		uploadDelta := counterDelta(connection.Upload, previous.upload)
-		downloadDelta := counterDelta(connection.Download, previous.download)
-		response.GatewayRates.Upload += bytesPerSecond(uploadDelta, elapsed)
-		response.GatewayRates.Download += bytesPerSecond(downloadDelta, elapsed)
-
-		if localIdentity.matches(connection) {
-			response.GatewayLocal.UploadRate += bytesPerSecond(uploadDelta, elapsed)
-			response.GatewayLocal.DownloadRate += bytesPerSecond(downloadDelta, elapsed)
-			continue
-		}
-		sourceIP := normalizeTrafficIP(metadataString(connection.Metadata, "sourceIP"))
-		if row := byIP[sourceIP]; row != nil {
-			row.UploadRate += bytesPerSecond(uploadDelta, elapsed)
-			row.DownloadRate += bytesPerSecond(downloadDelta, elapsed)
-		}
-	}
-
 	for _, row := range response.Devices {
 		response.Totals.UploadRate += row.UploadRate
 		response.Totals.DownloadRate += row.DownloadRate
 	}
-	s.sampledAt = sampledAt
-	s.connections = current
+	response.GatewayTotals.UploadRate = response.GatewayRates.Upload
+	response.GatewayTotals.DownloadRate = response.GatewayRates.Download
+	s.sampledAt, s.connections = sampledAt, current
 }
 
 func (s *trafficRateSampler) reset() {
@@ -190,7 +132,9 @@ func bytesPerSecond(delta int64, elapsed time.Duration) int64 {
 func annotateRegisteredDeviceNames(response *DeviceTrafficResponse, policy device.PolicySet) {
 	byMAC := registeredDeviceNames(policy)
 	for index := range response.Devices {
-		response.Devices[index].Name = byMAC[response.Devices[index].MAC]
+		if name := byMAC[response.Devices[index].MAC]; name != "" {
+			response.Devices[index].Name = name
+		}
 	}
 }
 
@@ -218,129 +162,117 @@ func aggregateDeviceTraffic(leases []device.Client, snapshot mihomo.ConnectionsS
 
 func aggregateDeviceTrafficWithPolicy(leases []device.Client, policy device.PolicySet, snapshot mihomo.ConnectionsSnapshot, localIdentity gatewayLocalIdentity, prefixLen int, observeLAN bool) DeviceTrafficResponse {
 	gatewayIP := localIdentity.gatewayIP
-	selected := selectCurrentLeases(leases)
-	rows := make([]DeviceTraffic, 0, len(selected)+len(policy.Devices))
-	byIP := make(map[string]int, len(selected)+len(policy.Devices))
-	gatewayLocal := DeviceTraffic{
-		IP:             normalizeTrafficIP(gatewayIP),
-		IdentitySource: identitySourceGatewayLocal,
-		Transport:      localTransportNone,
-	}
-	for _, lease := range selected {
+	rows := make([]DeviceTraffic, 0, len(leases)+len(policy.Devices))
+	byIP := map[string]int{}
+	byID := map[string]int{}
+	for _, lease := range selectCurrentLeases(leases) {
 		ip := normalizeTrafficIP(lease.IP)
-		if ip == "" {
+		if ip == "" || (gatewayIP != "" && !sameLANSourceIPv4(ip, gatewayIP, prefixLen)) {
 			continue
 		}
-		byIP[ip] = len(rows)
-		rows = append(rows, DeviceTraffic{
-			Hostname:       lease.Hostname,
-			IP:             ip,
-			MAC:            strings.ToLower(strings.TrimSpace(lease.MAC)),
-			Online:         lease.Online,
-			IdentitySource: identitySourceDHCPLease,
-		})
+		index := len(rows)
+		rows = append(rows, DeviceTraffic{Hostname: lease.Hostname, IP: ip, MAC: strings.ToLower(strings.TrimSpace(lease.MAC)), Online: lease.Online, IdentitySource: identitySourceDHCPLease, Addresses: []string{ip}})
+		if _, exists := byIP[ip]; exists {
+			byIP[ip] = -1
+		} else {
+			byIP[ip] = index
+		}
 	}
 	for _, managed := range policy.Devices {
 		ip := normalizeTrafficIP(managed.IPv4)
 		if ip == "" || (gatewayIP != "" && !sameLANSourceIPv4(ip, gatewayIP, prefixLen)) {
 			continue
 		}
-		if index, exists := byIP[ip]; exists {
-			if (observeLAN && strings.TrimSpace(managed.MAC) == "") || strings.EqualFold(rows[index].MAC, managed.MAC) {
-				rows[index].Name = device.DisplayName(managed)
-				rows[index].GatewayTarget = device.EffectiveGatewayTarget(managed.GatewayTarget)
+		index, exists := byIP[ip]
+		if exists {
+			if index < 0 || !((observeLAN && strings.TrimSpace(managed.MAC) == "") || strings.EqualFold(rows[index].MAC, managed.MAC)) {
+				continue
 			}
+		} else {
+			index = len(rows)
+			byIP[ip] = index
+			rows = append(rows, DeviceTraffic{IP: ip, MAC: strings.ToLower(strings.TrimSpace(managed.MAC)), IdentitySource: identitySourceRegisteredStatic, Addresses: []string{ip}})
+		}
+		rows[index].Name = device.DisplayName(managed)
+		rows[index].DeviceID = managed.ID
+		rows[index].ConfigurationState = "applied"
+		rows[index].GatewayTarget = device.EffectiveGatewayTarget(managed.GatewayTarget)
+		// Only MAC-backed applied identities are exported to the packet listener.
+		if mac, err := net.ParseMAC(managed.MAC); err == nil && len(mac) == 6 && managed.ID != "" {
+			if _, duplicate := byID[managed.ID]; duplicate {
+				byID[managed.ID] = -1
+			} else {
+				byID[managed.ID] = index
+			}
+		}
+	}
+	for _, connection := range snapshot.Connections {
+		if localIdentity.matches(connection) || hasDownstreamInboundIdentity(connection) {
+			continue
+		}
+		ip := normalizeTrafficIP(metadataString(connection.Metadata, "sourceIP"))
+		if !observeLAN || !sameLANSourceIPv4(ip, gatewayIP, prefixLen) {
+			continue
+		}
+		if _, exists := byIP[ip]; exists {
 			continue
 		}
 		byIP[ip] = len(rows)
-		rows = append(rows, DeviceTraffic{
-			Name:           device.DisplayName(managed),
-			IP:             ip,
-			MAC:            strings.ToLower(strings.TrimSpace(managed.MAC)),
-			IdentitySource: identitySourceRegisteredStatic,
-			GatewayTarget:  device.EffectiveGatewayTarget(managed.GatewayTarget),
-		})
+		rows = append(rows, DeviceTraffic{IP: ip, Online: true, IdentitySource: identitySourceObservedTraffic, Addresses: []string{ip}})
 	}
-	for _, connection := range snapshot.Connections {
-		if localIdentity.matches(connection) {
-			continue
-		}
-		sourceIP := normalizeTrafficIP(metadataString(connection.Metadata, "sourceIP"))
-		if !observeLAN || !sameLANSourceIPv4(sourceIP, gatewayIP, prefixLen) {
-			continue
-		}
-		if _, exists := byIP[sourceIP]; exists {
-			continue
-		}
-		byIP[sourceIP] = len(rows)
-		rows = append(rows, DeviceTraffic{
-			IP:             sourceIP,
-			Online:         true,
-			IdentitySource: identitySourceObservedTraffic,
-		})
+	for index := range rows {
+		rows[index].Key = trafficDeviceKey(rows[index])
 	}
-
-	egressByDevice := make([]map[string]egressUsage, len(rows))
-	localEgress := map[string]egressUsage{}
-	localHasTUN := false
-	localHasExplicitProxy := false
-	unclassified := 0
-	for _, connection := range snapshot.Connections {
+	local := DeviceTraffic{Key: gatewayLocalOwner, IP: normalizeTrafficIP(gatewayIP), IdentitySource: identitySourceGatewayLocal, Transport: localTransportNone, Addresses: []string{}}
+	unknown := DeviceTraffic{Key: unclassifiedOwner, IdentitySource: unclassifiedOwner, Addresses: []string{}}
+	egress := map[string]map[string]egressUsage{}
+	owners := make([]string, len(snapshot.Connections))
+	localHasTUN, localHasExplicit := false, false
+	gatewayTotals := DeviceTrafficTotals{ActiveConnections: len(snapshot.Connections)}
+	for index, connection := range snapshot.Connections {
+		row := &unknown
 		if localIdentity.matches(connection) {
-			upload := nonnegativeBytes(connection.Upload)
-			download := nonnegativeBytes(connection.Download)
-			gatewayLocal.ActiveConnections++
-			gatewayLocal.Online = true
-			gatewayLocal.Upload += upload
-			gatewayLocal.Download += download
-			if egress := connectionEgress(connection.Chains); egress != "" {
-				usage := localEgress[egress]
-				usage.connections++
-				usage.bytes += upload + download
-				localEgress[egress] = usage
-			}
+			row = &local
 			switch localConnectionTransport(connection) {
 			case localTransportTUN:
 				localHasTUN = true
 			case localTransportExplicitProxy:
-				localHasExplicitProxy = true
+				localHasExplicit = true
 			}
-			continue
+		} else if hasDownstreamInboundIdentity(connection) {
+			if deviceIndex, ok := byID[packetTrafficDevice(connection)]; ok && deviceIndex >= 0 {
+				row = &rows[deviceIndex]
+			}
+		} else if deviceIndex, ok := byIP[normalizeTrafficIP(metadataString(connection.Metadata, "sourceIP"))]; ok && deviceIndex >= 0 {
+			row = &rows[deviceIndex]
 		}
-		sourceIP := metadataString(connection.Metadata, "sourceIP")
-		index, ok := byIP[normalizeTrafficIP(sourceIP)]
-		if !ok {
-			unclassified++
-			continue
+		owners[index] = row.Key
+		row.ActiveConnections++
+		row.Online = true
+		row.Upload += nonnegativeBytes(connection.Upload)
+		row.Download += nonnegativeBytes(connection.Download)
+		addTrafficAddress(row, normalizeTrafficIP(metadataString(connection.Metadata, "sourceIP")))
+		gatewayTotals.Upload += nonnegativeBytes(connection.Upload)
+		gatewayTotals.Download += nonnegativeBytes(connection.Download)
+		if chain := connectionEgress(connection.Chains); chain != "" {
+			if egress[row.Key] == nil {
+				egress[row.Key] = map[string]egressUsage{}
+			}
+			usage := egress[row.Key][chain]
+			usage.connections++
+			usage.bytes += nonnegativeBytes(connection.Upload) + nonnegativeBytes(connection.Download)
+			egress[row.Key][chain] = usage
 		}
-		upload := nonnegativeBytes(connection.Upload)
-		download := nonnegativeBytes(connection.Download)
-		rows[index].ActiveConnections++
-		rows[index].Online = true
-		rows[index].Upload += upload
-		rows[index].Download += download
-
-		egress := connectionEgress(connection.Chains)
-		if egress == "" {
-			continue
-		}
-		if egressByDevice[index] == nil {
-			egressByDevice[index] = map[string]egressUsage{}
-		}
-		usage := egressByDevice[index][egress]
-		usage.connections++
-		usage.bytes += upload + download
-		egressByDevice[index][egress] = usage
 	}
-
 	for index := range rows {
-		rows[index].PrimaryEgress = primaryEgress(egressByDevice[index])
+		rows[index].PrimaryEgress = primaryEgress(egress[rows[index].Key])
+		sort.Strings(rows[index].Addresses)
 		if rows[index].GatewayTarget == device.GatewayTargetUpstreamRouter && rows[index].PrimaryEgress == "" {
 			rows[index].PrimaryEgress = "主路由直连"
 		}
 	}
-	gatewayLocal.PrimaryEgress = primaryEgress(localEgress)
-	gatewayLocal.Transport = combinedLocalTransport(localHasTUN, localHasExplicitProxy, gatewayLocal.ActiveConnections > 0)
+	local.PrimaryEgress = primaryEgress(egress[gatewayLocalOwner])
+	local.Transport = combinedLocalTransport(localHasTUN, localHasExplicit, local.ActiveConnections > 0)
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].ActiveConnections != rows[j].ActiveConnections {
 			return rows[i].ActiveConnections > rows[j].ActiveConnections
@@ -351,9 +283,8 @@ func aggregateDeviceTrafficWithPolicy(leases []device.Client, policy device.Poli
 		if rows[i].Hostname != rows[j].Hostname {
 			return rows[i].Hostname < rows[j].Hostname
 		}
-		return rows[i].IP < rows[j].IP
+		return rows[i].Key < rows[j].Key
 	})
-
 	totals := DeviceTrafficTotals{Devices: len(rows)}
 	unidentified := 0
 	for _, row := range rows {
@@ -365,14 +296,9 @@ func aggregateDeviceTrafficWithPolicy(leases []device.Client, policy device.Poli
 		}
 	}
 	return DeviceTrafficResponse{
-		GatewayLocal:                  gatewayLocal,
-		Devices:                       rows,
-		Totals:                        totals,
-		UnidentifiedDeviceConnections: unidentified,
-		UnclassifiedConnections:       unclassified,
-		// Kept for compatibility with clients that treated every non-device
-		// connection as unmatched. New UI code uses the explicit categories.
-		UnmatchedConnections: gatewayLocal.ActiveConnections + unclassified,
+		GatewayLocal: local, Devices: rows, Totals: totals, GatewayTotals: gatewayTotals, Unclassified: unknown,
+		UnidentifiedDeviceConnections: unidentified, UnclassifiedConnections: unknown.ActiveConnections,
+		UnmatchedConnections: local.ActiveConnections + unknown.ActiveConnections, connectionOwners: owners,
 	}
 }
 
@@ -408,15 +334,20 @@ func combinedLocalTransport(hasTUN, hasExplicitProxy, hasConnections bool) strin
 }
 
 func loadAppliedDevicePolicy(paths runtime.Paths) device.PolicySet {
+	bundle, _ := loadAppliedDevicePolicyBundle(paths)
+	return bundle.Policy
+}
+
+func loadAppliedDevicePolicyBundle(paths runtime.Paths) (device.PolicyBundle, bool) {
 	state, exists, err := runtime.LoadState(paths.StateFile)
 	if err != nil || !exists || state.DevicePolicyDigest == "" {
-		return device.PolicySet{}
+		return device.PolicyBundle{}, false
 	}
 	bundle, err := device.LoadPolicyBundleSnapshot(paths.DevicePolicyApplied)
 	if err != nil || bundle.Digest != state.DevicePolicyDigest {
-		return device.PolicySet{}
+		return device.PolicyBundle{}, false
 	}
-	return bundle.Policy
+	return bundle, true
 }
 
 func observedLANDevices(snapshot mihomo.ConnectionsSnapshot, neighbors []macosnetwork.Neighbor, gatewayIP string, prefixLen int, registered ...device.ManagedDevice) []ObservedDevice {

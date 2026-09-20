@@ -171,8 +171,19 @@ recovery state active until the network has actually been restored.
 - **连通性** (Connectivity) shows latency, matched rules, and egress chains
   through the applied configuration and current local-Mac mode. It does not
   represent a downstream-device path.
-- **诊断** (Diagnostics) shows recent operations, connections, providers, and
-  redacted logs.
+- **连接** (Connections) shows active sessions, destinations, matched rules,
+  actual egress chains, and rates by Mac or downstream device. Search, filter
+  by protocol or source address family, sort, paginate, or pause the display.
+  Dashboard and Devices provide shortcuts.
+- **诊断** (Diagnostics) shows recent operations, providers, and redacted logs.
+
+Connections keeps registered devices even when they have no active traffic,
+and distinguishes a DHCP lease, an unapplied registration, and observed traffic.
+No active sessions does not mean a device is offline. IPv4 traffic sent directly
+to the main router is outside this observation scope. When identity is verified,
+IPv4 and downstream IPv6 sessions belong to the same device; uncertain sources
+remain unclassified. This is an active-session view. Pausing the display does
+not pause networking, and failed updates label the last sample as stale.
 
 The menu bar panel and Web GUI sidebar both provide **合盖保持运行** (Keep
 Running with Lid Closed). It is off by default, applies only to the current

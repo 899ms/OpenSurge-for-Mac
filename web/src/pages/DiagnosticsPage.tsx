@@ -6,7 +6,7 @@ import { t } from '../i18n'
 
 const doctorPollIntervalMs = 500
 
-export function DiagnosticsPage({ overview }: { overview: Overview | null }) {
+export function DiagnosticsPage({ overview, onOpenConnections }: { overview: Overview | null; onOpenConnections?: (owner?: string) => void }) {
   const [details, setDetails] = useState<Diagnostics | null>(null)
   const [doctorStatus, setDoctorStatus] = useState<DoctorRunStatus | null>(null)
   const [doctorError, setDoctorError] = useState('')
@@ -62,7 +62,7 @@ export function DiagnosticsPage({ overview }: { overview: Overview | null }) {
   const running = doctorStatus?.state === 'running'
   const checks = doctorStatus?.checks ?? []
   return <>
-    <PageHeader eyebrow="DIAGNOSTICS" title="诊断、连接与 Provider" description="错误保持结构化；日志经过已知凭据脱敏，菜单栏只复制压缩摘要。" />
+    <PageHeader eyebrow="DIAGNOSTICS" title="诊断与 Provider" description="错误保持结构化；日志经过已知凭据脱敏，菜单栏只复制压缩摘要。" />
     <section className="split">
       <div>
         <div className="diagnostic-doctor-head">
@@ -76,7 +76,7 @@ export function DiagnosticsPage({ overview }: { overview: Overview | null }) {
       </div>
       <div><SectionTitle title="Proxy Providers" subtitle="可从这里观察和刷新，不在菜单栏中执行" />{overview?.providers.proxy_providers.map(provider => <div className="row" key={provider.name}><StatusDot status={provider.proxies.some(proxy => proxy.alive) ? 'running' : 'degraded'} /><div className="grow"><strong>{provider.name}</strong><small>{provider.proxy_count} proxies · {provider.vehicle_type}</small></div><button onClick={() => void api.refreshProvider(provider.name)}>{t('刷新')}</button></div>)}</div>
     </section>
-    <section className="section"><SectionTitle title="Live Connections" subtitle={details?.connection_error || `${details?.connections.connections.length ?? 0} active connections`} /><div className="inventory"><span>↑ {details?.connections.upload_total ?? 0} bytes</span><span>↓ {details?.connections.download_total ?? 0} bytes</span>{details?.connections.connections.slice(0, 12).map(connection => <span key={connection.id}>{connection.rule || 'MATCH'} · {(connection.chains ?? []).join(' → ') || connection.id.slice(0, 8)}</span>)}</div></section>
+    <section className="section"><SectionTitle title="连接观察" subtitle="按设备查看完整连接、命中规则和实际出口" />{onOpenConnections && <button className="primary" type="button" onClick={() => onOpenConnections()}>{t('查看全部连接')}</button>}</section>
     <section className="section"><SectionTitle title="Recent logs" subtitle="每个进程最多 80 行；API 会遮蔽 mihomo secret 与 upstream credentials" />{Object.entries(details?.logs ?? {}).map(([name, lines]) => <div key={name}><h3>{name}</h3><pre>{lines.join('\n') || 'No log output'}</pre></div>)}</section>
     <section className="section"><SectionTitle title="Operations 与恢复记录" subtitle={`Recovery: ${details?.recovery.stage ?? overview?.recovery.stage ?? 'idle'}`} />{details?.operations.length ? details.operations.map(operation => <div className="row" key={operation.id}><StatusDot status={operation.state === 'failed' ? 'degraded' : operation.state === 'succeeded' ? 'running' : 'stopped'} /><div className="grow"><strong>{operation.kind} · {operation.state}</strong><small>{operation.id} · {operation.updated_at}{operation.error ? ` · ${operation.error}` : ''}</small></div></div>) : <div className="empty">{t('尚无生命周期操作记录')}</div>}</section>
   </>

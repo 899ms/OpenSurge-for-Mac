@@ -77,6 +77,7 @@ type Server struct {
 	measureProxyDelay     func(context.Context, config.Config, string, string, time.Duration) mihomo.ProxyDelayResult
 	probeConnectivity     func(context.Context, config.Config, ConnectivityTarget) ConnectivityResult
 	trafficSampler        *trafficRateSampler
+	connectionObservation connectionObservationCache
 	gatewayStatus         func(context.Context, config.Config) (gateway.Status, error)
 	doctor                *doctorController
 	mihomoRecovery        *mihomoRecoveryController
@@ -305,6 +306,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /api/v1/device-policy", s.auth(http.HandlerFunc(s.handleDevicePolicy)))
 	mux.Handle("GET /api/v1/devices", s.auth(http.HandlerFunc(s.handleDevices)))
 	mux.Handle("GET /api/v1/device-traffic", s.auth(http.HandlerFunc(s.handleDeviceTraffic)))
+	mux.Handle("GET /api/v1/connections", s.auth(http.HandlerFunc(s.handleConnections)))
 	mux.Handle("POST /api/v1/devices/{device}/connections/refresh", s.auth(http.HandlerFunc(s.handleDeviceConnectionRefresh)))
 	mux.Handle("POST /api/v1/devices/{device}/selectors/{slot}", s.auth(http.HandlerFunc(s.handleDeviceSelection)))
 	mux.Handle("GET /api/v1/policies", s.auth(http.HandlerFunc(s.handlePolicies)))

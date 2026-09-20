@@ -17,6 +17,7 @@ const copyPolicy = (value: PolicySet) => normalizePolicy(structuredClone(value))
 
 type DevicesPageProps = {
   overview: Overview | null
+  onOpenConnections?: (owner?: string) => void
   onChanged: () => Promise<void>
   onNavigate: (page: 'dashboard' | 'network' | 'policies') => void
   onDirtyChange: (dirty: boolean) => void
@@ -26,7 +27,7 @@ type DevicesPageProps = {
 type DeviceRebindRequest = { deviceID: string; name: string; fromIPv4: string; toIPv4: string }
 type RuleLibraryTab = 'rule_sets' | 'templates' | 'device_routes'
 
-export function DevicesPage({ overview, onChanged, onNavigate, onDirtyChange, onNotify }: DevicesPageProps) {
+export function DevicesPage({ overview, onChanged, onNavigate, onDirtyChange, onNotify, onOpenConnections }: DevicesPageProps) {
   const proxyHealth = useProxyHealth()
   const [data, setData] = useState<DevicesResponse | null>(null)
   const [controlConfig, setControlConfig] = useState<ControlConfig | null>(null)
@@ -271,6 +272,7 @@ export function DevicesPage({ overview, onChanged, onNavigate, onDirtyChange, on
 
     <section className="section live-section local-routing-section">
       <SectionTitle title="当前 Mac 的设备设置" subtitle="即时生效 · 与下游设备路由方式相互独立" />
+      {onOpenConnections && <button className="text-link" type="button" onClick={() => onOpenConnections('gateway-local')}>{t('查看本机连接')}</button>}
       <LocalRoutingCard running={overview?.status.gateway === 'running'} interfaceName={overview?.status.interface} lanIP={overview?.status.lan_ip} healthByName={proxyHealth.byName} testing={proxyHealth.testing} onHealthTest={proxyHealth.test} onChanged={async () => { await onChanged(); await proxyHealth.refresh() }} onPolicies={() => onNavigate('policies')} />
     </section>
 
@@ -280,7 +282,7 @@ export function DevicesPage({ overview, onChanged, onNavigate, onDirtyChange, on
       <section className="section live-section device-outlet-section">
         <SectionTitle title="设备出口" subtitle="出口选择即时生效 · 路由方式保存后重载" />
         <div className="device-stack">
-            {deviceViews(policy.devices, data?.applied_devices ?? (data?.applied ? data.devices : []), new Set(data?.changed_devices ?? []), new Set(data?.out_of_lan_devices ?? []), overview?.topology).map(view => <DeviceCard key={`${view.desired?.id ?? view.applied?.id}-${view.state}`} view={view} running={overview?.status.gateway === 'running'} topology={overview?.topology} lanPrefix={data?.lan_prefix ?? ''} routerBypass={routerBypass} routerBypassReady={routerBypassReady} onNetworkSettings={() => onNavigate('network')} leases={data?.leases ?? []} observed={data?.observed_devices ?? []} desiredDevices={policy.devices} groups={groups} healthByName={proxyHealth.byName} healthTesting={proxyHealth.testing} onHealthTest={proxyHealth.test} selected={selectedDeviceID === (view.desired?.id ?? view.applied?.id)} onSelect={() => view.desired && setSelectedDeviceID(view.desired.id)} onEditRouting={() => view.desired && editDeviceRouting(view.desired.id)} onEditIdentity={() => view.desired && editDeviceIdentity(view.desired.id)} onRemove={() => view.desired && removeDevice(view.desired.id)} onUseObservedIPv4={(deviceID, name, fromIPv4, toIPv4) => setRebindRequest({ deviceID, name, fromIPv4, toIPv4 })} onRouteModeChange={mode => {
+            {deviceViews(policy.devices, data?.applied_devices ?? (data?.applied ? data.devices : []), new Set(data?.changed_devices ?? []), new Set(data?.out_of_lan_devices ?? []), overview?.topology).map(view => <DeviceCard onViewConnections={onOpenConnections ? () => onOpenConnections(`device:${view.applied?.id ?? view.desired?.id}`) : undefined} key={`${view.desired?.id ?? view.applied?.id}-${view.state}`} view={view} running={overview?.status.gateway === 'running'} topology={overview?.topology} lanPrefix={data?.lan_prefix ?? ''} routerBypass={routerBypass} routerBypassReady={routerBypassReady} onNetworkSettings={() => onNavigate('network')} leases={data?.leases ?? []} observed={data?.observed_devices ?? []} desiredDevices={policy.devices} groups={groups} healthByName={proxyHealth.byName} healthTesting={proxyHealth.testing} onHealthTest={proxyHealth.test} selected={selectedDeviceID === (view.desired?.id ?? view.applied?.id)} onSelect={() => view.desired && setSelectedDeviceID(view.desired.id)} onEditRouting={() => view.desired && editDeviceRouting(view.desired.id)} onEditIdentity={() => view.desired && editDeviceIdentity(view.desired.id)} onRemove={() => view.desired && removeDevice(view.desired.id)} onUseObservedIPv4={(deviceID, name, fromIPv4, toIPv4) => setRebindRequest({ deviceID, name, fromIPv4, toIPv4 })} onRouteModeChange={mode => {
               if (!view.desired) return
               const next = copyPolicy(policy)
               next.devices = next.devices.map(device => {
@@ -359,7 +361,7 @@ type DeviceRouteMode = AppliedDeviceEgressMode | 'upstream_router'
 type EditableDeviceRouteMode = DeviceEgressMode | 'upstream_router'
 type RouterBypassSettings = { gateway: string; dns: string[] }
 
-function DeviceCard({ view, running, topology, lanPrefix, routerBypass, routerBypassReady, onNetworkSettings, leases, observed, desiredDevices, groups, healthByName, healthTesting, onHealthTest, selected, onSelect, onEditRouting, onEditIdentity, onRemove, onUseObservedIPv4, onRouteModeChange, onChanged }: { view: DeviceView; running: boolean; topology?: string; lanPrefix: string; routerBypass: RouterBypassSettings; routerBypassReady: boolean; onNetworkSettings: () => void; leases: Lease[]; observed: ObservedDevice[]; desiredDevices: PolicyDevice[]; groups: ProxyGroup[]; healthByName: Map<string, ProxyHealthEntry>; healthTesting: Set<string>; onHealthTest: (names: string[]) => Promise<void>; selected: boolean; onSelect: () => void; onEditRouting: () => void; onEditIdentity: () => void; onRemove: () => void; onUseObservedIPv4: (deviceID: string, name: string, fromIPv4: string, toIPv4: string) => void; onRouteModeChange: (mode: EditableDeviceRouteMode) => void; onChanged: () => Promise<void> }) {
+function DeviceCard({ onViewConnections, view, running, topology, lanPrefix, routerBypass, routerBypassReady, onNetworkSettings, leases, observed, desiredDevices, groups, healthByName, healthTesting, onHealthTest, selected, onSelect, onEditRouting, onEditIdentity, onRemove, onUseObservedIPv4, onRouteModeChange, onChanged }: { onViewConnections?: () => void; view: DeviceView; running: boolean; topology?: string; lanPrefix: string; routerBypass: RouterBypassSettings; routerBypassReady: boolean; onNetworkSettings: () => void; leases: Lease[]; observed: ObservedDevice[]; desiredDevices: PolicyDevice[]; groups: ProxyGroup[]; healthByName: Map<string, ProxyHealthEntry>; healthTesting: Set<string>; onHealthTest: (names: string[]) => Promise<void>; selected: boolean; onSelect: () => void; onEditRouting: () => void; onEditIdentity: () => void; onRemove: () => void; onUseObservedIPv4: (deviceID: string, name: string, fromIPv4: string, toIPv4: string) => void; onRouteModeChange: (mode: EditableDeviceRouteMode) => void; onChanged: () => Promise<void> }) {
   const [rulesOpen, setRulesOpen] = useState(false)
   const device = view.desired ?? view.applied!
   const applied = view.applied
@@ -410,6 +412,7 @@ function DeviceCard({ view, running, topology, lanPrefix, routerBypass, routerBy
     {view.desired && <div className="device-card-actions">
       <button className="edit-device" type="button" onClick={onEditRouting}>{t(selected ? '正在编辑设备分流' : '编辑设备分流')}</button>
       <span className="device-card-manage">
+        {onViewConnections && <button className="text-link" type="button" onClick={onViewConnections}>{t('查看连接')}</button>}
         <button className="text-link" type="button" onClick={onEditIdentity}>{t('编辑身份与路由')}</button>
         <button className="danger-link" type="button" onClick={onRemove}>{t('删除设备')}</button>
       </span>
