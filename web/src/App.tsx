@@ -29,7 +29,7 @@ const nav = [
   { id: 'network', label: '网络设置', icon: '⌁' },
   { id: 'sources', label: '代理与规则源', icon: '◎' },
   { id: 'devices', label: '设备', icon: '▣' },
-  { id: 'connections', label: '连接', icon: '⇌' },
+  { id: 'connections', label: '连接', icon: '⇅' },
   { id: 'policies', label: '策略', icon: '⇄' },
   { id: 'connectivity', label: '连通性', icon: '◌' },
   { id: 'diagnostics', label: '诊断', icon: '⌘' },
