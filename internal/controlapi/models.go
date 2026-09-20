@@ -519,24 +519,48 @@ type DeviceTrafficResponse struct {
 	UnclassifiedConnections       int                 `json:"unclassified_connections"`
 	UnmatchedConnections          int                 `json:"unmatched_connections"`
 	ConnectionError               string              `json:"connection_error,omitempty"`
+	InventoryError                string              `json:"inventory_error,omitempty"`
+	GatewayTotals                 DeviceTrafficTotals `json:"gateway_totals"`
+	Unclassified                  DeviceTraffic       `json:"unclassified"`
+	connectionOwners              []string
+	connectionRates               []TrafficRates
 }
 
 type DeviceTraffic struct {
-	Name              string `json:"name,omitempty"`
-	Hostname          string `json:"hostname,omitempty"`
-	IP                string `json:"ip"`
-	MAC               string `json:"mac"`
-	Online            bool   `json:"online"`
-	ActiveConnections int    `json:"active_connections"`
-	Upload            int64  `json:"upload"`
-	Download          int64  `json:"download"`
-	UploadRate        int64  `json:"upload_rate"`
-	DownloadRate      int64  `json:"download_rate"`
-	PrimaryEgress     string `json:"primary_egress,omitempty"`
-	IdentitySource    string `json:"identity_source"`
-	Transport         string `json:"transport,omitempty"`
-	GatewayTarget     string `json:"gateway_target,omitempty"`
-	IPv6Blocked       bool   `json:"ipv6_blocked,omitempty"`
+	Key                string   `json:"key"`
+	DeviceID           string   `json:"device_id,omitempty"`
+	Addresses          []string `json:"addresses"`
+	ConfigurationState string   `json:"configuration_state,omitempty"`
+	Name               string   `json:"name,omitempty"`
+	Hostname           string   `json:"hostname,omitempty"`
+	IP                 string   `json:"ip"`
+	MAC                string   `json:"mac"`
+	Online             bool     `json:"online"`
+	ActiveConnections  int      `json:"active_connections"`
+	Upload             int64    `json:"upload"`
+	Download           int64    `json:"download"`
+	UploadRate         int64    `json:"upload_rate"`
+	DownloadRate       int64    `json:"download_rate"`
+	PrimaryEgress      string   `json:"primary_egress,omitempty"`
+	IdentitySource     string   `json:"identity_source"`
+	Transport          string   `json:"transport,omitempty"`
+	GatewayTarget      string   `json:"gateway_target,omitempty"`
+	IPv6Blocked        bool     `json:"ipv6_blocked,omitempty"`
+}
+
+// ConnectionsResponse and /device-traffic share one cached observation. All
+// counters are active-session counters, including GatewayTotals.
+type ConnectionsResponse struct {
+	DeviceTrafficResponse
+	Connections []ObservedConnection `json:"connections"`
+}
+
+type ObservedConnection struct {
+	mihomo.Connection
+	OwnerKey     string `json:"owner_key"`
+	SourceFamily string `json:"source_family"`
+	UploadRate   int64  `json:"upload_rate"`
+	DownloadRate int64  `json:"download_rate"`
 }
 
 type DeviceTrafficTotals struct {

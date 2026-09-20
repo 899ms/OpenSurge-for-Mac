@@ -225,9 +225,13 @@ Helper 请求可选 `watch_progress`：新 Helper 先发送带 `progress` 的 JS
 写入标记，以免后续启动继续访问 Keychain；旧项不自动删除。迁移失败不能阻止 Control
 Service 启动，已有来源快照继续可用，用户可重新导入 URL 恢复刷新能力。
 
-设备流量面板使用独立的受认证 `GET /api/v1/device-traffic`，不要在前端重复解释 raw
-connections。后端用 DHCP lease、applied 静态设备和当前观察到的网关 LAN 源 IPv4 建立
-下游 inventory，再按 mihomo `metadata.sourceIP` 归属当前活跃会话。本机身份由
+总览使用受认证的 `GET /api/v1/device-traffic`，连接页使用 `GET /api/v1/connections`。
+两者复用同一份后端归属、计数器差值和一秒内共享的采样；配置、运行状态、租约或登记
+变化会使缓存失效。不要在前端重复解释 raw connections 的设备身份。后端用 DHCP lease、
+applied 设备、desired 登记和当前观察到的网关 LAN 源 IPv4 建立清单。只有已进入 applied
+bundle 的 compiled devices 可以作为运行中的登记身份；未应用、暂停的 IP-only 登记和
+网段外设备保留在清单中，但不能作为归属证据。IPv4 仍按源地址归属，冲突身份不强行合并。
+本机身份由
 `internal/controlapi/gateway_local.go` 统一判断：系统 TUN 快照额外读取一次 mihomo
 `/configs` 的实际 `inet4-address`/`inet6-address`，同时要求 `type=Tun`、
 `inboundName=DEFAULT-TUN` 和精确本机源地址。只取接口地址，不取整个 CIDR；下游也
@@ -248,10 +252,26 @@ connections。后端用 DHCP lease、applied 静态设备和当前观察到的�
 
 没有 DHCP/静态身份但能确认网关 LAN 源 IPv4 的行使用 `observed_traffic`，其连接数进入
 `unidentified_device_connections`，GUI 称为“待识别设备连接”。地址缺失、网段外且没有
-本机证据等剩余连接进入 `unclassified_connections`，只提示到诊断页查看。
+本机证据等剩余连接进入 `unclassified_connections`，可在连接页的“无法归属”中查看。
 `unmatched_connections` 是旧客户端兼容字段，当前 GUI 不再用它解释来源身份。
 `identity_source` 必须区分 `gateway_local`、`dhcp_lease`、`registered_static` 与
-`observed_traffic`。主出口按累计字节最多的完整 chain 选择。
+`observed_traffic`；无法归属的独立汇总行使用 `unclassified`。主出口按累计字节最多的完整 chain 选择。
+
+下游 IPv6 归属必须同时满足 `type=Tun`、`inboundName=opensurge-ipv6`、合法 IPv6
+源地址和 `inboundUser=device:<id>`，且 ID 对应当前 LAN 中带 MAC 的有效 applied 设备。
+同一设备的 IPv4、多条 IPv6 隐私地址聚合到 `device:<id>`；未知 ID、其他 listener、
+缺少身份或 MAC 冲突保留为无法归属，不能按 IPv6 前缀或进程猜测。本机精确 TUN 身份
+仍优先排除下游身份。`connections[].owner_key`、`source_family` 和速率由后端统一给出；
+`gateway_totals = gateway_local + totals + unclassified`，计数、会话字节和速率均可核对。
+这里的网关总量也只表示当前活跃连接，不等同于网卡累计字节或 mihomo 历史总量。
+
+连接页是独立一级导航，设备页继续负责配置，诊断页负责操作/Provider/日志。总览与设备页
+可按 owner 深链接到连接页。筛选、排序、选择设备和滚动位置在切页返回时保留；每页最多
+显示 50 条连接。暂停会取消进行中的请求并固定画面，恢复后重新采样；页面隐藏或卸载时
+停止有效更新。连接离开快照后仅保留选中项的最后详情，不把它扩展成历史连接日志。
+“有租约”“已应用登记”“观察到流量”分别展示，没有活跃连接不表示设备离线。
+主路由旁路的 IPv4 显示不在统计范围内。网络错误保留上次快照并标注过时；核心不可用
+仍返回清单并隐藏统计；租约/登记读取错误单独以 `inventory_error` 标明清单可能不完整。
 
 这是 `active_sessions` 快照，不是持久化历史。mihomo 不可用时仍返回本机、lease 与
 applied 静态设备 inventory，并通过 `connection_error` 明确统计不可用。实时 bytes/s

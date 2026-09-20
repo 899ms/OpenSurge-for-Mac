@@ -92,7 +92,8 @@ Vitest 中的 fixture 只供自动化测试使用，不会被 `pnpm dev` 自动�
 | 代理与规则源 | `--store` 下的 `sources.json`、凭据和来源快照 |
 | 设备 | device policy、DHCP lease、邻居发现，以及 mihomo 当前连接 |
 | 策略与节点 | applied mihomo API 中的策略组、节点健康和当前选择 |
-| 连通性与诊断 | applied runtime、mihomo 连接、日志、操作记录和 recovery 状态 |
+| 连接 | 共享的设备归属快照、活跃连接、命中规则、出口链和速率 |
+| 连通性与诊断 | applied runtime、日志、操作记录和 recovery 状态 |
 
 使用 `examples/config.example.yaml` 与新的临时 store 时，看到的是示例网络配置加当前 Mac
 的实际只读状态，而不是预置演示场景。该示例默认未配置 `device_policy.file`，临时 store
@@ -262,9 +263,14 @@ connections 与最多 80 行近期日志；已知 mihomo/upstream 凭据在 API 
 诊断 DTO 同时带最近 20 条持久化 start/stop/reload operation 与当前 recovery 状态，另有
 `GET /api/v1/operations` 返回最近 50 条，便于审计幂等 operation ID、失败和完成时间。
 
-总览的设备流量面板每 2 秒读取受认证的 `GET /api/v1/device-traffic`。Control Service
-用 DHCP lease、applied 静态设备和当前观察到的网关 LAN IPv4 建立下游设备清单，再按
-mihomo connection 的 `metadata.sourceIP` 归属当前活跃会话 `upload`/`download`。
+总览的设备流量面板每 2 秒读取受认证的 `GET /api/v1/device-traffic`，独立的连接页读取
+`GET /api/v1/connections`。两者共享一秒内的快照、归属和速率采样，避免多处读取干扰
+计数器差值。配置、runtime、租约、applied/desired 登记变化会使缓存失效。Control Service
+合并 DHCP lease、applied 设备、desired 登记和当前观察到的 LAN IPv4 清单；只有 applied
+bundle 中实际 compiled 的设备身份可以认领流量，其他登记只补充清单与状态。IPv4 按
+`metadata.sourceIP` 归属；IPv6 必须匹配专用 `opensurge-ipv6` listener、`type=Tun`、
+合法 IPv6 源地址和 `inboundUser=device:<id>`，且 ID 是当前 LAN 中带 MAC 的有效 applied
+设备。同一设备的双栈连接与 IPv6 隐私地址合并，未知或冲突身份留在“无法归属”。
 本机归属不依赖 `process/processPath` 或订阅是否带 `PROCESS-NAME`。快照中出现系统
 TUN 连接时，额外读取一次 mihomo `/configs` 的实际 `inet4-address`/`inet6-address`，
 同时匹配 `type=Tun`、`inboundName=DEFAULT-TUN` 和精确接口源地址；不能匹配整个
@@ -274,7 +280,7 @@ TUN/fake-IP 子网，也不能用下游连接同样拥有的 `inboundIP` 判断�
 “活跃设备”的第一行，并按实际 connection type 显示 TUN、显式代理或两者。没有 DHCP/
 静态身份、但能确认网关 LAN 源 IPv4 的会话进入 `observed_traffic` 行并计入
 `unidentified_device_connections`；地址缺失、网段外且没有本机证据等剩余连接进入
-`unclassified_connections`，只作为诊断提示。`unmatched_connections` 仅作为旧客户端
+`unclassified_connections`，可在连接页查看其独立汇总及明细。`unmatched_connections` 仅作为旧客户端
 兼容字段保留，当前 GUI 不再用它解释来源身份。
 
 累计流量、实时速率和“关闭本机旧连接”共用同一份本机身份判断。身份随当前运行中的
@@ -293,6 +299,18 @@ TUN 地址更新，不从 desired IPv6 `auto` 设置或之前的连接进程信�
 设备 IPv4 列在展开状态仍然保留。宽屏右侧趋势卡绝对定位在由设备列表决定的网格行内，
 不参与行高计算，因此展开和收起不会改变页面总高度或触发底部滚动跳动；窄屏才改为带
 高度过渡的纵向展开。
+
+连接页包含全部、本机、下游设备和无法归属四类入口，支持协议、来源地址族、出口类型、
+搜索、速率/时间排序、50 条分页和连接详情。设备页继续负责登记与策略配置，总览和设备页
+提供按设备查看连接的入口。`owner_key` 由后端统一确定，URL 使用 `owner` 参数；切页返回
+保留筛选与滚动状态。没有连接不意味着离线，旁路 IPv4 明确显示不在统计范围内。
+暂停更新会取消请求并固定画面，页面隐藏时暂停采样。连接离开当前快照后保留最后选中详情，
+不累计连接历史。请求失败保留上次快照并标注采样时间；核心/身份错误与清单读取错误分别
+通过 `connection_error` 和 `inventory_error` 提示。
+
+`connections[].owner_key`、来源地址族和速率与聚合共用同一采样；所有会话只进入一个 owner。
+`gateway_totals` 的连接数、会话累计字节和速率均等于 `gateway_local + totals + unclassified`。
+速率只在有相邻有效样本的连接上计算，首次、新连接和错误恢复的基线速率为零。
 
 ## 局域网 DHCP 接管恢复状态
 
