@@ -437,6 +437,8 @@ Direct 命中 `DIRECT`，Global 的 TCP 走所选出口而 HTTP-only UDP 明确�
 `DEFAULT-TUN + fdfe:dcba:9876::1/128`，不得扩大到 fake-IP `/64`、
 下游 `/64`、`fc00::/7` 或 `opensurge-ipv6`。再结合下游 IPv6 门槛中
 `opensurge-ipv6` / `IN-USER` 仍保持设备策略的证据，才能完成本机与下游隔离结论。
+该门槛默认从固定源码构建并使用发布同源的 patched Mihomo；不要退回 Lab 引导用的
+上游 `v1.19.27`，后者在纯 IPv4 Mac 上不会为这条门槛合成 fake-AAAA。
 
 ## 每设备策略门槛
 

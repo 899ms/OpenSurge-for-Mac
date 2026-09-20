@@ -12,6 +12,9 @@ if [[ -f "$PROXY_ENV" ]]; then
 fi
 export PATH="$TOOLS_ROOT/lima/bin:$TOOLS_ROOT/bin:$PATH"
 NETWORK_HELPER=/opt/open-mihomo-gateway/bin/omg-lab-network
+NETWORK_HELPER_SOURCE="$ROOT/tests/lab/host/omg-lab-network"
+NETWORK_LAUNCHD_PLIST=/Library/LaunchDaemons/io.opensurge.lab.socket-vmnet.plist
+NETWORK_LAUNCHD_PLIST_SOURCE="$ROOT/tests/lab/host/io.opensurge.lab.socket-vmnet.plist"
 SOCKET=/private/var/run/open-mihomo-gateway-lab.sock
 INTERFACE_FILE=/private/var/run/open-mihomo-gateway-lab.interface
 TEMPLATE="$ROOT/tests/lab/lima/client.yaml"
@@ -113,6 +116,14 @@ require_installed_lab() {
   fi
 }
 
+require_current_network_helper() {
+  if ! cmp -s "$NETWORK_HELPER_SOURCE" "$NETWORK_HELPER" ||
+    ! cmp -s "$NETWORK_LAUNCHD_PLIST_SOURCE" "$NETWORK_LAUNCHD_PLIST"; then
+    echo "installed Lab network helper is stale; run: ./tests/lab/install-host-deps.sh --root-only" >&2
+    exit 1
+  fi
+}
+
 require_cached_sudo() {
   if sudo -n true 2>/dev/null; then
     return 0
@@ -162,6 +173,7 @@ instance_dir() {
 }
 
 start_network() {
+  require_current_network_helper
   sudo -n "$NETWORK_HELPER" start
   [[ -S "$SOCKET" ]] || { echo "lab socket was not created" >&2; exit 1; }
   [[ -r "$INTERFACE_FILE" ]] || { echo "lab interface state was not created" >&2; exit 1; }
@@ -3370,6 +3382,14 @@ run_test() {
   [[ -r "$INTERFACE_FILE" ]] || { echo "lab is not up; run: make lab-up" >&2; exit 1; }
   require_cached_sudo
   ensure_lab_state_writable
+  echo "Lab public HTTPS probe: $TEST_URL"
+  if [[ "$LOCAL_ROUTING_TEST" == "true" && -z "${OMG_LAB_MIHOMO_BINARY:-}" ]]; then
+    # The local IPv6 identity assertions require fake-AAAA support from the
+    # same patched Mihomo line shipped by OpenSurge. The bootstrap v1.19.27
+    # Lab binary does not synthesize fake IPv6 on an IPv4-only Mac.
+    build_ipv6_lab_binaries
+    OMG_LAB_MIHOMO_BINARY="$PATCHED_MIHOMO_BINARY"
+  fi
   write_config "$mode"
   require_command go
   mkdir -p "$ROOT/bin"
@@ -3512,6 +3532,7 @@ run_test() {
 
 check_lab() {
   require_installed_lab
+  require_current_network_helper
   limactl --version
   /opt/socket_vmnet/bin/socket_vmnet --version
   dnsmasq --version | head -1

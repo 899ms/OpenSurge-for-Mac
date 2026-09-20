@@ -511,8 +511,8 @@ __PROXY_EXPORTS__
         clear-manual) clear_manual ;;
         restore-control) restore_control_dns ;;
         status) status ;;
-        test) test_path ;;
-        transparent) transparent_test ;;
+        test) test_path "$@" ;;
+        transparent) transparent_test "$@" ;;
         udp) udp_probe "$@" ;;
         ipv6-transparent) ipv6_transparent_test "$@" ;;
         ipv6-udp) ipv6_udp_test "$@" ;;
