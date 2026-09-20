@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"open-mihomo-gateway/internal/config"
 	"open-mihomo-gateway/internal/runtime"
@@ -60,9 +61,18 @@ func TestManagerStartResolvesRelativeConfigAndLogPaths(t *testing.T) {
 		}
 	})
 
-	data, err := os.ReadFile(argsFile)
-	if err != nil {
-		t.Fatal(err)
+	var data []byte
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var err error
+		data, err = os.ReadFile(argsFile)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal(err)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	wantConfig, err := filepath.Abs(paths.DNSMasqConf)
 	if err != nil {
