@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import { Empty, PageHeader } from '../components/Common'
+import type { ConnectionRefreshSuggestion } from '../components/ConnectionRefreshPrompts'
 import { OutletSummary } from '../components/OutletSummary'
 import { PolicyGroupHealthCard } from '../components/PolicyGroupHealthCard'
 import { PolicyGroupNav } from '../components/PolicyGroupNav'
@@ -24,11 +25,12 @@ type PoliciesPageProps = {
   onViewStateChange: (patch: Partial<PoliciesViewState>) => void
   restoreScrollY: number | null
   onScrollPositionChange: (scrollY: number) => void
+  onSuggestConnectionRefresh?: (suggestion: ConnectionRefreshSuggestion) => void
 }
 
 const emptyGroups: ProxyGroup[] = []
 
-export function PoliciesPage({ overview, onChanged, viewState, onViewStateChange, restoreScrollY, onScrollPositionChange }: PoliciesPageProps) {
+export function PoliciesPage({ overview, onChanged, viewState, onViewStateChange, restoreScrollY, onScrollPositionChange, onSuggestConnectionRefresh }: PoliciesPageProps) {
   const { search, scope, activeGroup } = viewState
   const refreshKey = JSON.stringify([overview?.revision, overview?.status.gateway, overview?.status.mihomo, overview?.desired_digest, overview?.applied_digest, overview?.desired_profile_digest, overview?.applied_profile_digest, overview?.policies])
   const { snapshot, byName, testing, loading, error, refresh, test, select: selectWorkspacePolicy } = usePolicyWorkspace(refreshKey)
@@ -59,7 +61,12 @@ export function PoliciesPage({ overview, onChanged, viewState, onViewStateChange
   }).length
 
   const select = async (group: string, policy: string) => {
+    const previous = groups.find(item => item.name === group)?.selected
     await selectWorkspacePolicy(group, policy)
+    const deviceID = deviceIDFromPolicyGroup(group)
+    if (overview?.status.gateway === 'running' && previous !== policy && deviceID) {
+      onSuggestConnectionRefresh?.({ key: `device:${deviceID}`, scope: 'device', deviceID, subject: deviceID, selection: policyDisplayName(policy, byName.get(policy)) })
+    }
     await onChanged()
   }
 
@@ -167,6 +174,7 @@ export function PoliciesPage({ overview, onChanged, viewState, onViewStateChange
       testing={testing}
       onTest={test}
       onChanged={async () => { await onChanged(); await refresh() }}
+      onSuggestConnectionRefresh={onSuggestConnectionRefresh}
     />
     <section className="policy-health-overview" aria-label={t('节点健康概览')}><div><small>{t('当前视图')}</small><strong>{filteredGroups.length}</strong><span>{t('个策略组')}</span></div><div><small>{t('已检测')}</small><strong>{tested}</strong><span>{t('个出口')}</span></div><div><small>{t('当前可达')}</small><strong>{reachable}</strong><span>{t('个出口')}</span></div><div className="health-legend"><span><i className="legend-dot excellent" />{t('快速')}</span><span><i className="legend-dot good" />{t('可用')}</span><span><i className="legend-dot slow" />{t('较慢')}</span><span><i className="legend-dot unreachable" />{t('不可达')}</span></div></section>
     <div className="policy-controls-sticky" ref={controlsRef}>
@@ -187,12 +195,14 @@ function LocalMacGlobalPolicy({
   testing,
   onTest,
   onChanged,
+  onSuggestConnectionRefresh,
 }: {
   running: boolean
   healthByName: Map<string, ProxyHealthEntry>
   testing: Set<string>
   onTest: (names: string[]) => Promise<void>
   onChanged: () => Promise<void>
+  onSuggestConnectionRefresh?: (suggestion: ConnectionRefreshSuggestion) => void
 }) {
   const [routing, setRouting] = useState<LocalRouting | null>(null)
   const [error, setError] = useState('')
@@ -222,6 +232,9 @@ function LocalMacGlobalPolicy({
     if (!routing) return
     const updated = await api.setLocalRouting(routing.mode, policy)
     setRouting(updated)
+    if (updated.mode === 'global' && routing.global_group?.selected !== updated.global_group?.selected && updated.global_group) {
+      onSuggestConnectionRefresh?.({ key: 'gateway_local', scope: 'gateway_local', subject: t('Mac 本机'), selection: policyDisplayName(updated.global_group.selected, healthByName.get(updated.global_group.selected)) })
+    }
     await onChanged()
   }
 
@@ -245,4 +258,9 @@ function LocalMacGlobalPolicy({
       {error && <div className="notice warn" role="alert">{error}</div>}
     </div>
   </section>
+}
+
+function deviceIDFromPolicyGroup(group: string) {
+  const [namespace, deviceID, slot] = group.split('/')
+  return namespace === 'device' && deviceID && slot ? deviceID : ''
 }

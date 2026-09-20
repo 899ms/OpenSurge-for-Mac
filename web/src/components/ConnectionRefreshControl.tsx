@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { ConnectionRefreshResult } from '../types'
 import { t } from '../i18n'
 
-const refreshExplanation = '手动关闭当前仍使用旧链路的连接；客户端产生新连接后，将按当前选择的新节点建立。'
+const refreshExplanation = '手动关闭此范围内当前由 OpenSurge 管理的连接；客户端产生新连接后，将按当前策略建立。'
 
 export function ConnectionRefreshControl({
   ariaLabel,
