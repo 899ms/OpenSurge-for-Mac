@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, authenticationRequiredEvent, RequestError } from './api'
 import { PageErrorBoundary } from './components/PageErrorBoundary'
+import { ConnectionRefreshPrompts, queueConnectionRefreshSuggestion, type ConnectionRefreshSuggestion, type ConnectionRefreshSuggestionItem } from './components/ConnectionRefreshPrompts'
 import { OperationNotifications, type OperationNotification, type OperationNotificationItem } from './components/OperationNotifications'
 import { OperationProgress } from './components/OperationProgress'
 import { LanguageSelector } from './components/LanguageSelector'
@@ -77,7 +78,9 @@ export function App() {
   const [policiesViewState, setPoliciesViewState] = useState<PoliciesViewState>({ search: '', scope: 'global', activeGroup: null })
   const [sleepPreventionChanging, setSleepPreventionChanging] = useState(false)
   const [notifications, setNotifications] = useState<OperationNotificationItem[]>([])
+  const [connectionRefreshSuggestions, setConnectionRefreshSuggestions] = useState<ConnectionRefreshSuggestionItem[]>([])
   const notificationID = useRef(0)
+  const connectionRefreshSuggestionID = useRef(0)
   const sleepPreventionGeneration = useRef(0)
   const languageGeneration = useRef(0)
   const policiesScrollPosition = useRef<number | null>(null)
@@ -235,6 +238,19 @@ export function App() {
     setNotifications(current => current.filter(notification => notification.id !== id))
   }, [])
 
+  const suggestConnectionRefresh = useCallback((suggestion: ConnectionRefreshSuggestion) => {
+    const id = ++connectionRefreshSuggestionID.current
+    setConnectionRefreshSuggestions(current => queueConnectionRefreshSuggestion(current, suggestion, id))
+  }, [])
+
+  const dismissConnectionRefreshSuggestion = useCallback((id: number) => {
+    setConnectionRefreshSuggestions(current => current.filter(suggestion => suggestion.id !== id))
+  }, [])
+
+  useEffect(() => {
+    if (overview && overview.status.gateway !== 'running') setConnectionRefreshSuggestions([])
+  }, [overview?.status.gateway])
+
   const updatePoliciesViewState = useCallback((patch: Partial<PoliciesViewState>) => {
     setPoliciesViewState(current => {
       const next = { ...current, ...patch }
@@ -268,15 +284,18 @@ export function App() {
           {page === 'dashboard' && <DashboardPage overview={overview} onOpenConnections={openConnections} onOpenNetwork={action => go('network', action === 'cleanup' ? 'control' : action === 'stop' ? 'bottom' : 'none')} />}
           {page === 'network' && <NetworkPage overview={overview} onChanged={refresh} onNavigate={() => go('devices')} onNotify={notify} />}
           {page === 'sources' && <SourcesPage overview={overview} onChanged={refresh} onNotify={notify} />}
-          {page === 'devices' && <DevicesPage overview={overview} onOpenConnections={openConnections} onChanged={refresh} onNavigate={go} onDirtyChange={setDevicesDirty} onNotify={notify} />}
-          {page === 'policies' && <PoliciesPage overview={overview} onChanged={refresh} viewState={policiesViewState} onViewStateChange={updatePoliciesViewState} restoreScrollY={policiesScrollPosition.current} onScrollPositionChange={updatePoliciesScrollPosition} />}
+          {page === 'devices' && <DevicesPage overview={overview} onOpenConnections={openConnections} onChanged={refresh} onNavigate={go} onDirtyChange={setDevicesDirty} onNotify={notify} onSuggestConnectionRefresh={suggestConnectionRefresh} />}
+          {page === 'policies' && <PoliciesPage overview={overview} onChanged={refresh} onSuggestConnectionRefresh={suggestConnectionRefresh} viewState={policiesViewState} onViewStateChange={updatePoliciesViewState} restoreScrollY={policiesScrollPosition.current} onScrollPositionChange={updatePoliciesScrollPosition} />}
           {page === 'connections' && <ConnectionsPage overview={overview} view={connectionsView} onViewChange={changeConnectionsView} restoreScrollY={connectionsScroll.current} />}
           {page === 'connectivity' && <ConnectivityPage overview={overview} onChanged={refresh} />}
           {page === 'diagnostics' && <DiagnosticsPage overview={overview} onOpenConnections={openConnections} />}
         </PageErrorBoundary>
       </>}
     </main>
-    {!authenticationRequired && <OperationProgress onOpenDiagnostics={() => go('diagnostics')} />}
+    {!authenticationRequired && <div className="bottom-right-stack">
+      <ConnectionRefreshPrompts suggestions={connectionRefreshSuggestions} onDismiss={dismissConnectionRefreshSuggestion} onRefreshed={refresh} />
+      <OperationProgress onOpenDiagnostics={() => go('diagnostics')} />
+    </div>}
     <OperationNotifications notifications={notifications} onDismiss={dismissNotification} />
   </div>
 }

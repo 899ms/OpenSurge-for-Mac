@@ -3,6 +3,7 @@ import { api, RequestError, waitForOperation } from '../api'
 import { Empty, PageHeader, SectionTitle } from '../components/Common'
 import { DeviceOutletSummary } from '../components/DeviceOutletSummary'
 import { ConnectionRefreshControl } from '../components/ConnectionRefreshControl'
+import type { ConnectionRefreshSuggestion } from '../components/ConnectionRefreshPrompts'
 import { LocalRoutingCard } from '../components/LocalRoutingCard'
 import { CLAUDE_CODE_RULE_SET_NAMES, CLAUDE_CODE_RULE_SETS, CLAUDE_CODE_SOURCE, CLAUDE_CODE_TEMPLATE, isBuiltinRuleSetID, visibleRuleSets } from '../data/builtinRuleLibrary'
 import type { OperationNotification } from '../components/OperationNotifications'
@@ -22,12 +23,13 @@ type DevicesPageProps = {
   onNavigate: (page: 'dashboard' | 'network' | 'policies') => void
   onDirtyChange: (dirty: boolean) => void
   onNotify: (notification: OperationNotification) => void
+  onSuggestConnectionRefresh?: (suggestion: ConnectionRefreshSuggestion) => void
 }
 
 type DeviceRebindRequest = { deviceID: string; name: string; fromIPv4: string; toIPv4: string }
 type RuleLibraryTab = 'rule_sets' | 'templates' | 'device_routes'
 
-export function DevicesPage({ overview, onChanged, onNavigate, onDirtyChange, onNotify, onOpenConnections }: DevicesPageProps) {
+export function DevicesPage({ overview, onChanged, onNavigate, onDirtyChange, onNotify, onOpenConnections, onSuggestConnectionRefresh }: DevicesPageProps) {
   const proxyHealth = useProxyHealth()
   const [data, setData] = useState<DevicesResponse | null>(null)
   const [controlConfig, setControlConfig] = useState<ControlConfig | null>(null)
@@ -273,7 +275,7 @@ export function DevicesPage({ overview, onChanged, onNavigate, onDirtyChange, on
     <section className="section live-section local-routing-section">
       <SectionTitle title="当前 Mac 的设备设置" subtitle="即时生效 · 与下游设备路由方式相互独立" />
       {onOpenConnections && <button className="text-link" type="button" onClick={() => onOpenConnections('gateway-local')}>{t('查看本机连接')}</button>}
-      <LocalRoutingCard running={overview?.status.gateway === 'running'} interfaceName={overview?.status.interface} lanIP={overview?.status.lan_ip} healthByName={proxyHealth.byName} testing={proxyHealth.testing} onHealthTest={proxyHealth.test} onChanged={async () => { await onChanged(); await proxyHealth.refresh() }} onPolicies={() => onNavigate('policies')} />
+      <LocalRoutingCard running={overview?.status.gateway === 'running'} interfaceName={overview?.status.interface} lanIP={overview?.status.lan_ip} healthByName={proxyHealth.byName} testing={proxyHealth.testing} onHealthTest={proxyHealth.test} onChanged={async () => { await onChanged(); await proxyHealth.refresh() }} onPolicies={() => onNavigate('policies')} onSuggestConnectionRefresh={onSuggestConnectionRefresh} />
     </section>
 
     {document ? <>
@@ -292,7 +294,7 @@ export function DevicesPage({ overview, onChanged, onNavigate, onDirtyChange, on
                 return { ...rest, egress_mode: mode }
               })
               setPolicy(next)
-            }} onChanged={async () => { await onChanged(); await refresh(); await proxyHealth.refresh() }} />)}
+            }} onChanged={async () => { await onChanged(); await refresh(); await proxyHealth.refresh() }} onSuggestConnectionRefresh={onSuggestConnectionRefresh} />)}
         </div>
         {!policy.devices.length && !data?.devices.length && <Empty text={t(overview?.topology === 'same_lan' ? '尚未登记设备。使用上方“登记新设备”可从当前经过 Mac 的设备开始。' : '尚未登记设备。使用上方“登记新设备”可直接从当前 DHCP 租约开始。')} />}
       </section>
@@ -361,7 +363,7 @@ type DeviceRouteMode = AppliedDeviceEgressMode | 'upstream_router'
 type EditableDeviceRouteMode = DeviceEgressMode | 'upstream_router'
 type RouterBypassSettings = { gateway: string; dns: string[] }
 
-function DeviceCard({ onViewConnections, view, running, topology, lanPrefix, routerBypass, routerBypassReady, onNetworkSettings, leases, observed, desiredDevices, groups, healthByName, healthTesting, onHealthTest, selected, onSelect, onEditRouting, onEditIdentity, onRemove, onUseObservedIPv4, onRouteModeChange, onChanged }: { onViewConnections?: () => void; view: DeviceView; running: boolean; topology?: string; lanPrefix: string; routerBypass: RouterBypassSettings; routerBypassReady: boolean; onNetworkSettings: () => void; leases: Lease[]; observed: ObservedDevice[]; desiredDevices: PolicyDevice[]; groups: ProxyGroup[]; healthByName: Map<string, ProxyHealthEntry>; healthTesting: Set<string>; onHealthTest: (names: string[]) => Promise<void>; selected: boolean; onSelect: () => void; onEditRouting: () => void; onEditIdentity: () => void; onRemove: () => void; onUseObservedIPv4: (deviceID: string, name: string, fromIPv4: string, toIPv4: string) => void; onRouteModeChange: (mode: EditableDeviceRouteMode) => void; onChanged: () => Promise<void> }) {
+function DeviceCard({ onViewConnections, view, running, topology, lanPrefix, routerBypass, routerBypassReady, onNetworkSettings, leases, observed, desiredDevices, groups, healthByName, healthTesting, onHealthTest, selected, onSelect, onEditRouting, onEditIdentity, onRemove, onUseObservedIPv4, onRouteModeChange, onChanged, onSuggestConnectionRefresh }: { onViewConnections?: () => void; view: DeviceView; running: boolean; topology?: string; lanPrefix: string; routerBypass: RouterBypassSettings; routerBypassReady: boolean; onNetworkSettings: () => void; leases: Lease[]; observed: ObservedDevice[]; desiredDevices: PolicyDevice[]; groups: ProxyGroup[]; healthByName: Map<string, ProxyHealthEntry>; healthTesting: Set<string>; onHealthTest: (names: string[]) => Promise<void>; selected: boolean; onSelect: () => void; onEditRouting: () => void; onEditIdentity: () => void; onRemove: () => void; onUseObservedIPv4: (deviceID: string, name: string, fromIPv4: string, toIPv4: string) => void; onRouteModeChange: (mode: EditableDeviceRouteMode) => void; onChanged: () => Promise<void>; onSuggestConnectionRefresh?: (suggestion: ConnectionRefreshSuggestion) => void }) {
   const [rulesOpen, setRulesOpen] = useState(false)
   const device = view.desired ?? view.applied!
   const applied = view.applied
@@ -381,6 +383,7 @@ function DeviceCard({ onViewConnections, view, running, topology, lanPrefix, rou
   const rebindAlreadyDrafted = Boolean(observedIPv4 && view.desired?.ipv4 === observedIPv4)
   const identityBlocked = identity?.state === 'address_changed' || identity?.state === 'conflict'
   const refreshReady = identity?.state === 'ready' || identity?.state === 'observed' || (topology === 'same_lan' && Boolean(applied?.mac.trim()) && identity?.state === 'waiting')
+  const deviceName = view.desired ? displayDeviceName(view.desired) : device.id
   return <article className={`device-card ${selected ? 'selected' : ''}`}>
     <div className="source-head"><button className="device-title" type="button" disabled={!view.desired} aria-pressed={selected} onClick={onSelect}><small>{device.profile}</small><strong>{view.desired ? displayDeviceName(view.desired) : device.id}</strong></button><span className={`pill ${view.state === 'applied' ? 'ok' : ''}`}>{deviceStateLabel(view.state)}</span></div>
     <div className="device-metadata">
@@ -403,11 +406,11 @@ function DeviceCard({ onViewConnections, view, running, topology, lanPrefix, rou
     {desiredMode === 'legacy_fallback' && <div className="legacy-mode-warning" role="status"><strong>{t('需要选择新的路由方式')}</strong><small>{t('当前配置使用旧版兼容行为：先匹配全局规则，设备出口仅作兜底。')}</small></div>}
     {runningTarget === 'upstream_router' && <div className="runtime-route router-bypass"><span><strong>{t('IPv4 直连主路由')}{applied?.ipv6_blocked ? ` · ${t('IPv6 出站已阻止')}` : ''}</strong><small>{t('已配置网关 {{gateway}} · DNS {{dns}}；IPv4 在设备续租后生效，OpenSurge 不统计其 IPv4 流量。', { gateway: routerBypass.gateway || '—', dns: routerBypass.dns.join(', ') || '—' })}</small></span><span className="effect-badge restart">{t('续租后生效')}</span></div>}
     {runningTarget !== 'upstream_router' && runningMode === 'inherit_global' && (identityBlocked ? <div className="runtime-route identity-blocked"><span><strong>{t(identity?.state === 'address_changed' ? '当前 IP 尚未绑定' : '当前身份存在冲突')}</strong><small>{t('已应用配置仍对应 {{ip}}', { ip: applied!.ipv4 })}</small></span><span className="effect-badge restart">{t('待修复')}</span></div> : <div className="runtime-route following"><span><strong>{t('当前运行')}</strong><small>{t(identity?.state === 'waiting' ? '跟随网关规则 · 等待设备接入' : '跟随网关规则')}</small></span><span className="effect-badge live">{t(identity?.state === 'waiting' ? '已预设' : '已应用')}</span></div>)}
-    {runningTarget !== 'upstream_router' && (runningMode === 'dedicated' || runningMode === 'legacy_fallback') && <div className={`default-slot ${runningMode === 'legacy_fallback' ? 'legacy' : ''}`}>{defaultEntry ? <DeviceOutletControl identity={identity} device={applied!.id} slot={defaultEntry[0]} groupName={defaultEntry[1]} groups={groups} title={t(runningMode === 'dedicated' ? '独立出口' : '兼容兜底出口')} ariaLabel={t('{{id}} {{outlet}} 当前摘要', { id: device.id, outlet: t(runningMode === 'dedicated' ? '独立出口' : '兼容兜底出口') })} healthByName={healthByName} testing={healthTesting} onTest={onHealthTest} onChanged={onChanged} /> : <button className="outlet-summary unavailable" type="button" disabled><span className="outlet-summary-copy"><small>{t(runningMode === 'dedicated' ? '独立出口' : '兼容兜底出口')}</small><strong>{t('重载后可用')}</strong></span></button>}</div>}
+    {runningTarget !== 'upstream_router' && (runningMode === 'dedicated' || runningMode === 'legacy_fallback') && <div className={`default-slot ${runningMode === 'legacy_fallback' ? 'legacy' : ''}`}>{defaultEntry ? <DeviceOutletControl identity={identity} device={applied!.id} deviceName={deviceName} slot={defaultEntry[0]} groupName={defaultEntry[1]} groups={groups} title={t(runningMode === 'dedicated' ? '独立出口' : '兼容兜底出口')} ariaLabel={t('{{id}} {{outlet}} 当前摘要', { id: device.id, outlet: t(runningMode === 'dedicated' ? '独立出口' : '兼容兜底出口') })} healthByName={healthByName} testing={healthTesting} onTest={onHealthTest} onChanged={onChanged} onSuggestConnectionRefresh={running ? onSuggestConnectionRefresh : undefined} /> : <button className="outlet-summary unavailable" type="button" disabled><span className="outlet-summary-copy"><small>{t(runningMode === 'dedicated' ? '独立出口' : '兼容兜底出口')}</small><strong>{t('重载后可用')}</strong></span></button>}</div>}
     {!runningRouteMode && desiredRouteMode && view.state !== 'paused' && view.state !== 'out_of_lan' && <div className="runtime-route"><span><strong>{t('重载后应用')}</strong><small>{routeModeLabel(desiredRouteMode)}</small></span></div>}
     {runningRouteMode && desiredRouteMode && configuredRouteMode !== desiredRouteMode && <small className="draft-mode-delta">{t('草稿将改为“{{desired}}”；保存并重载前仍按“{{running}}”运行。', { desired: routeModeLabel(desiredRouteMode), running: routeModeLabel(runningRouteMode) })}</small>}
     <PolicyAdjustmentNotices device={applied} />
-    {ruleEntries.length > 0 && <div className="rule-slots"><button className="rule-slots-toggle" type="button" aria-expanded={rulesOpen} onClick={() => setRulesOpen(value => !value)}>{t('规则出口（{{count}}）', { count: ruleEntries.length })}<span>{t(rulesOpen ? '收起' : '展开')}</span></button>{rulesOpen && ruleEntries.map(([slot, groupName]) => <div className="rule-outlet-summary" key={slot}><DeviceOutletControl identity={identity} device={applied!.id} slot={slot} groupName={groupName} groups={groups} title={slot} ariaLabel={t('{{id}} {{slot}} 出口当前摘要', { id: device.id, slot })} healthByName={healthByName} testing={healthTesting} onTest={onHealthTest} onChanged={onChanged} /></div>)}</div>}
+    {ruleEntries.length > 0 && <div className="rule-slots"><button className="rule-slots-toggle" type="button" aria-expanded={rulesOpen} onClick={() => setRulesOpen(value => !value)}>{t('规则出口（{{count}}）', { count: ruleEntries.length })}<span>{t(rulesOpen ? '收起' : '展开')}</span></button>{rulesOpen && ruleEntries.map(([slot, groupName]) => <div className="rule-outlet-summary" key={slot}><DeviceOutletControl identity={identity} device={applied!.id} deviceName={deviceName} slot={slot} groupName={groupName} groups={groups} title={slot} ariaLabel={t('{{id}} {{slot}} 出口当前摘要', { id: device.id, slot })} healthByName={healthByName} testing={healthTesting} onTest={onHealthTest} onChanged={onChanged} onSuggestConnectionRefresh={running ? onSuggestConnectionRefresh : undefined} /></div>)}</div>}
     {applied && <ConnectionRefreshControl ariaLabel={t('刷新 {{name}} 连接', { name: view.desired ? displayDeviceName(view.desired) : applied.id })} disabled={!running || runningTarget === 'upstream_router' || !refreshReady} disabledReason={t(!running ? '启动网关后可以刷新此设备的连接。' : runningTarget === 'upstream_router' ? '此设备直连主路由，没有由 OpenSurge 管理的连接。' : '确认设备当前身份后可以刷新连接。')} refresh={() => api.refreshDeviceConnections(applied.id)} onRefreshed={onChanged} />}
     {view.desired && <div className="device-card-actions">
       <button className="edit-device" type="button" onClick={onEditRouting}>{t(selected ? '正在编辑设备分流' : '编辑设备分流')}</button>
@@ -439,10 +442,10 @@ function PolicyAdjustmentNotices({ device }: { device?: CompiledDevice }) {
   </div>
 }
 
-function DeviceOutletControl({ identity, device, slot, groupName, groups, title, ariaLabel, healthByName, testing, onTest, onChanged }: { identity: DeviceIdentity | null; device: string; slot: string; groupName: string; groups: ProxyGroup[]; title: string; ariaLabel: string; healthByName: Map<string, ProxyHealthEntry>; testing: Set<string>; onTest: (names: string[]) => Promise<void>; onChanged: () => Promise<void> }) {
+function DeviceOutletControl({ identity, device, deviceName, slot, groupName, groups, title, ariaLabel, healthByName, testing, onTest, onChanged, onSuggestConnectionRefresh }: { identity: DeviceIdentity | null; device: string; deviceName: string; slot: string; groupName: string; groups: ProxyGroup[]; title: string; ariaLabel: string; healthByName: Map<string, ProxyHealthEntry>; testing: Set<string>; onTest: (names: string[]) => Promise<void>; onChanged: () => Promise<void>; onSuggestConnectionRefresh?: (suggestion: ConnectionRefreshSuggestion) => void }) {
   const blocked = identity?.state === 'address_changed' || identity?.state === 'conflict'
   if (blocked) return <button className="outlet-summary unavailable" type="button" aria-label={ariaLabel} disabled><span className="outlet-summary-copy"><small>{title}</small><strong>{t(identity.state === 'address_changed' ? '先更新 IP 绑定' : '先解决身份冲突')}</strong></span></button>
-  return <DeviceOutletSummary device={device} slot={slot} groupName={groupName} groups={groups} title={`${title} · ${t(identity?.state === 'waiting' ? '预设' : '即时切换')}`} ariaLabel={ariaLabel} healthByName={healthByName} testing={testing} onTest={onTest} onChanged={onChanged} />
+  return <DeviceOutletSummary device={device} slot={slot} groupName={groupName} groups={groups} title={`${title} · ${t(identity?.state === 'waiting' ? '预设' : '即时切换')}`} ariaLabel={ariaLabel} healthByName={healthByName} testing={testing} onTest={onTest} onChanged={onChanged} onSelectionChanged={selection => onSuggestConnectionRefresh?.({ key: `device:${device}`, scope: 'device', deviceID: device, subject: deviceName, selection: policyDisplayName(selection, healthByName.get(selection)) })} />
 }
 
 function desiredEgressMode(device: PolicyDevice): AppliedDeviceEgressMode {

@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useRef, useState } from 'react'
 import type { LocalRouting, Overview, PolicyWorkspaceSnapshot, ProxyHealthSnapshot } from '../types'
+import type { ConnectionRefreshSuggestion } from '../components/ConnectionRefreshPrompts'
 
 vi.mock('../api', () => ({
   api: {
@@ -40,9 +41,9 @@ const overview = {
 
 let workspace: PolicyWorkspaceSnapshot
 
-function PoliciesPageHarness({ data = overview, onChanged = async () => {} }: { data?: Overview | null; onChanged?: () => Promise<void> }) {
+function PoliciesPageHarness({ data = overview, onChanged = async () => {}, onSuggestConnectionRefresh }: { data?: Overview | null; onChanged?: () => Promise<void>; onSuggestConnectionRefresh?: (suggestion: ConnectionRefreshSuggestion) => void }) {
   const [viewState, setViewState] = useState<PoliciesViewState>({ search: '', scope: 'global', activeGroup: null })
-  return <PoliciesPage overview={data} onChanged={onChanged} viewState={viewState} onViewStateChange={patch => setViewState(current => ({ ...current, ...patch }))} restoreScrollY={null} onScrollPositionChange={() => {}} />
+  return <PoliciesPage overview={data} onChanged={onChanged} onSuggestConnectionRefresh={onSuggestConnectionRefresh} viewState={viewState} onViewStateChange={patch => setViewState(current => ({ ...current, ...patch }))} restoreScrollY={null} onScrollPositionChange={() => {}} />
 }
 
 function PoliciesSessionHarness() {
@@ -309,6 +310,16 @@ describe('PoliciesPage', () => {
     expect(screen.getByRole('button', { name: 'device/alice/default 选择 Proxy-A' }).getAttribute('aria-pressed')).toBe('true')
   })
 
+  it('suggests a refresh only for the selected running device group', async () => {
+    const onSuggestConnectionRefresh = vi.fn()
+    render(<PoliciesPageHarness onSuggestConnectionRefresh={onSuggestConnectionRefresh} />)
+    await screen.findByRole('heading', { name: 'Main' })
+    await userEvent.click(screen.getByRole('button', { name: '设备策略' }))
+    await userEvent.click(screen.getByRole('button', { name: 'device/alice/default 选择 Proxy-A' }))
+
+    await waitFor(() => expect(onSuggestConnectionRefresh).toHaveBeenCalledWith({ key: 'device:alice', scope: 'device', deviceID: 'alice', subject: 'alice', selection: 'Proxy-A' }))
+  })
+
   it('does not show a late Mac runtime response after the gateway stops', async () => {
     let finishRouting!: (routing: LocalRouting) => void
     vi.mocked(api.localRouting).mockImplementationOnce(() => new Promise(resolve => { finishRouting = resolve }))
@@ -373,7 +384,8 @@ describe('PoliciesPage', () => {
 
   it('keeps the Mac global policy group first and switches it through the local-routing API', async () => {
     const onChanged = vi.fn(async () => {})
-    render(<PoliciesPageHarness onChanged={onChanged} />)
+    const onSuggestConnectionRefresh = vi.fn()
+    render(<PoliciesPageHarness onChanged={onChanged} onSuggestConnectionRefresh={onSuggestConnectionRefresh} />)
 
     const localGroup = await screen.findByRole('heading', { name: '本机全局策略组' })
     const mainGroup = await screen.findByRole('heading', { name: 'Main' })
@@ -383,6 +395,19 @@ describe('PoliciesPage', () => {
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Proxy-B/ }))
     await waitFor(() => expect(api.setLocalRouting).toHaveBeenCalledWith('rule', 'Proxy-B'))
     expect(onChanged).toHaveBeenCalledOnce()
+    expect(onSuggestConnectionRefresh).not.toHaveBeenCalled()
+  })
+
+  it('suggests a Mac refresh when the active fixed outlet changes', async () => {
+    vi.mocked(api.localRouting).mockResolvedValue(localRouting('global'))
+    vi.mocked(api.setLocalRouting).mockImplementation(async (mode, policy) => localRouting(mode, policy ?? 'Proxy-A'))
+    const onSuggestConnectionRefresh = vi.fn()
+    render(<PoliciesPageHarness onSuggestConnectionRefresh={onSuggestConnectionRefresh} />)
+
+    await userEvent.click(await screen.findByLabelText('本机全局策略组 当前策略 Proxy-A'))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Proxy-B/ }))
+
+    await waitFor(() => expect(onSuggestConnectionRefresh).toHaveBeenCalledWith({ key: 'gateway_local', scope: 'gateway_local', subject: 'Mac 本机', selection: 'Proxy-B' }))
   })
 
   it('keeps the search and active group when the page is left and mounted again', async () => {
