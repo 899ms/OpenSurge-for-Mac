@@ -1,4 +1,4 @@
-import type { APIError, ConnectionRefreshResult, ConnectivityResponse, ControlConfig, DevicePolicyDocument, DevicesResponse, DeviceTraffic, Diagnostics, DoctorRunStatus, GatewayPlan, LocalRouting, LocalRoutingMode, NetworkDefaults, NetworkInterfacesResponse, Operation, Overview, PolicySet, PolicyWorkspaceRequest, PolicyWorkspaceSnapshot, ProfileOverlay, ProfileOverlayDocument, ProfileOverlayPreview, ProxyGroup, ProxyHealthSnapshot, ProxyHealthTestResponse, SleepPreventionStatus, Source, SourceSnapshotFile, TailscaleDiscoveryResponse, TailscaleResponse, TailscaleUpdate, UIPreferences } from './types'
+import type { APIError, ConnectionObservation, ConnectionRefreshResult, ConnectivityResponse, ControlConfig, DevicePolicyDocument, DevicesResponse, DeviceTraffic, Diagnostics, DoctorRunStatus, GatewayPlan, LocalRouting, LocalRoutingMode, NetworkDefaults, NetworkInterfacesResponse, Operation, Overview, PolicySet, PolicyWorkspaceRequest, PolicyWorkspaceSnapshot, ProfileOverlay, ProfileOverlayDocument, ProfileOverlayPreview, ProxyGroup, ProxyHealthSnapshot, ProxyHealthTestResponse, SleepPreventionStatus, Source, SourceSnapshotFile, TailscaleDiscoveryResponse, TailscaleResponse, TailscaleUpdate, UIPreferences } from './types'
 import { getOperation, markOperationConnection, operationStatusUnknownMessage, recordOperation } from './operations'
 
 export class RequestError extends Error {
@@ -48,8 +48,8 @@ export const api = {
   discardRecovery: () => request('/api/v1/recovery/discard', { method: 'POST' }),
   abandonTakeover: () => request('/api/v1/recovery/abandon-takeover', { method: 'POST' }),
   applyStatic: () => request('/api/v1/network/apply-static', { method: 'POST' }),
-  probeDHCP: () => request('/api/v1/network/dhcp-probe', { method: 'POST' }),
-  confirmRouterRestored: () => request('/api/v1/recovery/router-restored', { method: 'POST' }),
+  probeDHCP: () => trackedRequest('dhcp-probe', '/api/v1/network/dhcp-probe', { method: 'POST' }),
+  confirmRouterRestored: () => trackedRequest('router-dhcp-restored', '/api/v1/recovery/router-restored', { method: 'POST' }),
   finishRecoveryManually: () => request('/api/v1/recovery/manual-finish', { method: 'POST', body: JSON.stringify({ router_dhcp_restored_confirmed: true }) }),
   finishRecoveryKeepingStatic: () => request('/api/v1/recovery/keep-static', { method: 'POST', body: JSON.stringify({ keep_static_confirmed: true }) }),
   restoreMacDHCP: () => request('/api/v1/network/restore-dhcp', { method: 'POST' }),
@@ -79,6 +79,7 @@ export const api = {
 	sourcePreview: (id: string) => request<ProfileOverlayPreview>(`/api/v1/sources/${encodeURIComponent(id)}/preview`),
   devices: () => request<DevicesResponse>('/api/v1/devices'),
   deviceTraffic: () => request<DeviceTraffic>('/api/v1/device-traffic'),
+  connections: (signal?: AbortSignal) => request<ConnectionObservation>('/api/v1/connections', { signal }),
   devicePolicy: () => request<DevicePolicyDocument>('/api/v1/device-policy'),
   saveDevicePolicy: (policy: PolicySet, revision: string) => trackedRequest<DevicePolicyDocument>('save-device-policy', '/api/v1/device-policy', { method: 'PUT', headers: { 'If-Match': `"${revision}"` }, body: JSON.stringify(policy) }),
   policies: () => request<{ groups: ProxyGroup[] }>('/api/v1/policies'),

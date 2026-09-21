@@ -95,6 +95,13 @@ fail closed；这项身份适用于分流归属，不应被宣传为防 MAC spoo
 仍可能获得 SLAAC/RDNSS，因此 UI 写“IPv6 出站已阻止”；若主路由 RA 未消除，设备可
 从 OpenSurge packet path 外直接走 IPv6，这不是 OpenSurge 能按设备拦截的链路。
 
+连接观察复用这个身份，不再只按源 IPv4 统计设备流量。Control API 仅在专用 listener、
+TUN 类型、合法 IPv6 源地址与已应用的 MAC-backed device ID 同时匹配时聚合到设备；
+未知身份仍留在网关总量的无法归属项，不混入本机。IPv6 隐私地址变化不改变设备 owner。
+三个 userspace IPv6 Lab 场景在 UDP 探测后读取受认证的 `/api/v1/connections`，核对真实
+packet 连接的 owner、设备会话字节以及汇总守恒，产物为 `ipv6-connection-observation.json`。
+修改这些归属规则后，仍需运行对应拓扑门槛，单元测试不能替代 host-network 证据。
+
 ## 生命周期与验收
 
 自动模式启动按 Mihomo → broker → gateway alias → dnsmasq RA；停止按 dnsmasq →

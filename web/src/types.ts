@@ -12,6 +12,8 @@ export type GatewayStatus = {
   tun_error?: string
   pf_anchor: string
   forwarding: string
+  ipv4_takeover: TakeoverState
+  ipv6_takeover: TakeoverState
   dns_ipv6: boolean
   tun_ipv6_requested: 'off' | 'auto' | 'always'
   ipv6_packet: 'disabled' | 'stopped' | 'ready' | 'failed'
@@ -19,6 +21,8 @@ export type GatewayStatus = {
   ipv6_reason?: string
   client_count: number
 }
+
+export type TakeoverState = 'ready' | 'waiting' | 'stopped' | 'disabled' | 'failed' | 'interrupted'
 
 export type DoctorCheck = { name: string; ok: boolean; message?: string }
 export type DoctorRunStatus = {
@@ -295,6 +299,10 @@ export type DevicesResponse = {
 }
 
 export type DeviceTrafficRow = {
+  key?: string
+  device_id?: string
+  addresses?: string[]
+  configuration_state?: 'applied' | 'pending' | 'out_of_lan'
   name?: string
   hostname?: string
   ip: string
@@ -306,7 +314,7 @@ export type DeviceTrafficRow = {
   upload_rate: number
   download_rate: number
   primary_egress?: string
-  identity_source?: 'dhcp_lease' | 'registered_static' | 'observed_traffic' | 'gateway_local'
+  identity_source?: 'dhcp_lease' | 'registered_static' | 'observed_traffic' | 'gateway_local' | 'unclassified'
   transport?: 'none' | 'tun' | 'explicit_proxy' | 'tun_and_explicit_proxy' | 'other'
   gateway_target?: DeviceGatewayTarget
   ipv6_blocked?: boolean
@@ -394,4 +402,26 @@ export type ConnectivityResponse = {
   results: ConnectivityResult[]
   started_at?: string
   completed_at?: string
+}
+
+export type ObservedConnection = {
+  id: string
+  owner_key: string
+  upload: number
+  download: number
+  upload_rate: number
+  download_rate: number
+  start?: string
+  chains?: string[]
+  rule?: string
+  rule_payload?: string
+  metadata?: Record<string, unknown>
+  source_family: 'ipv4' | 'ipv6' | 'unknown'
+}
+
+export type ConnectionObservation = DeviceTraffic & {
+  gateway_totals: DeviceTraffic['totals']
+  unclassified: DeviceTrafficRow
+  inventory_error?: string
+  connections: ObservedConnection[]
 }

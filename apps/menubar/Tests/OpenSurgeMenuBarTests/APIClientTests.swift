@@ -18,6 +18,21 @@ final class APIClientTests: XCTestCase {
         let status = try await client.status()
         XCTAssertEqual(status.gateway, "stopped")
         XCTAssertEqual(status.indicator, .stopped)
+        XCTAssertEqual(status.ipv4TakeoverState, "stopped")
+        XCTAssertEqual(status.ipv6TakeoverState, "unknown")
+    }
+
+    func testStatusDecodesUnifiedTakeoverStates() async throws {
+        let client = try makeClient()
+        MockURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/menubar")
+            let body = #"{"schema_version":1,"revision":"r1","gateway":"running","topology":"same_wifi_dhcp","lan_ip":"192.168.1.20","dhcp":"running","mihomo":"running","pf_anchor":"loaded","forwarding":"enabled","ipv4_takeover":"ready","ipv6_takeover":"waiting","client_count":2,"drift":false,"doctor_healthy":true,"recovery_required":false,"warnings":[]}"#
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(body.utf8))
+        }
+
+        let status = try await client.status()
+        XCTAssertEqual(status.ipv4TakeoverState, "ready")
+        XCTAssertEqual(status.ipv6TakeoverState, "waiting")
     }
 
     func testBootstrapSendsRequestedDeepLinkWithoutPuttingTokenInURL() async throws {

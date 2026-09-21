@@ -12,6 +12,9 @@ if [[ -f "$PROXY_ENV" ]]; then
 fi
 export PATH="$TOOLS_ROOT/lima/bin:$TOOLS_ROOT/bin:$PATH"
 NETWORK_HELPER=/opt/open-mihomo-gateway/bin/omg-lab-network
+NETWORK_HELPER_SOURCE="$ROOT/tests/lab/host/omg-lab-network"
+NETWORK_LAUNCHD_PLIST=/Library/LaunchDaemons/io.opensurge.lab.socket-vmnet.plist
+NETWORK_LAUNCHD_PLIST_SOURCE="$ROOT/tests/lab/host/io.opensurge.lab.socket-vmnet.plist"
 SOCKET=/private/var/run/open-mihomo-gateway-lab.sock
 INTERFACE_FILE=/private/var/run/open-mihomo-gateway-lab.interface
 TEMPLATE="$ROOT/tests/lab/lima/client.yaml"
@@ -113,6 +116,14 @@ require_installed_lab() {
   fi
 }
 
+require_current_network_helper() {
+  if ! cmp -s "$NETWORK_HELPER_SOURCE" "$NETWORK_HELPER" ||
+    ! cmp -s "$NETWORK_LAUNCHD_PLIST_SOURCE" "$NETWORK_LAUNCHD_PLIST"; then
+    echo "installed Lab network helper is stale; run: ./tests/lab/install-host-deps.sh --root-only" >&2
+    exit 1
+  fi
+}
+
 require_cached_sudo() {
   if sudo -n true 2>/dev/null; then
     return 0
@@ -162,6 +173,7 @@ instance_dir() {
 }
 
 start_network() {
+  require_current_network_helper
   sudo -n "$NETWORK_HELPER" start
   [[ -S "$SOCKET" ]] || { echo "lab socket was not created" >&2; exit 1; }
   [[ -r "$INTERFACE_FILE" ]] || { echo "lab interface state was not created" >&2; exit 1; }
@@ -761,6 +773,7 @@ collect_artifacts() {
     connection-refresh-response.json \
     ipv6-status.json \
     ipv6-devices.json \
+    ipv6-connection-observation.json \
     ipv6-state.evidence.json; do
     cp "$STATE_DIR/$evidence" "$artifact_dir/$evidence" 2>/dev/null || true
   done
@@ -1265,7 +1278,7 @@ start_control_api() {
       if /usr/bin/curl --fail --silent --show-error \
         --header "Authorization: Bearer $CONTROL_API_TOKEN" \
         "$api/api/v1/overview" >/dev/null 2>&1; then
-        echo "Control API ready for connection refresh Lab: $api"
+        echo "Control API ready for Lab: $api"
         return 0
       fi
     fi
@@ -2632,9 +2645,46 @@ run_device_policy_test() {
   echo "virtual LAN device-policy TUN test passed"
 }
 
+# The UDP probes leave active trackers in mihomo. Read the authenticated
+# observation API while those trackers still carry the broker's device identity.
+assert_ipv6_connection_observation() {
+  /usr/bin/curl --fail --silent --show-error \
+    --header "Authorization: Bearer $CONTROL_API_TOKEN" \
+    "http://127.0.0.1:$CONTROL_API_PORT/api/v1/connections" \
+    >"$STATE_DIR/ipv6-connection-observation.json"
+  /usr/bin/ruby -rjson - "$STATE_DIR/ipv6-connection-observation.json" "$1" <<'RUBY'
+snapshot = JSON.parse(File.read(ARGV.fetch(0)))
+abort snapshot["connection_error"] if snapshot["connection_error"]
+abort snapshot["inventory_error"] if snapshot["inventory_error"]
+owner = "device:#{ARGV.fetch(1)}"
+connections = snapshot.fetch("connections")
+packets = connections.select do |connection|
+  metadata = connection.fetch("metadata")
+  metadata["inboundName"] == "opensurge-ipv6" && metadata["inboundUser"] == owner
+end
+abort "no active IPv6 packet connections for #{owner}" if packets.empty?
+abort "IPv6 packet connection was not attributed to #{owner}" unless packets.all? { |c| c["owner_key"] == owner && c["source_family"] == "ipv6" }
+abort "IPv6 packet connections contain no traffic" unless packets.sum { |c| c.fetch("upload") + c.fetch("download") } > 0
+rows = [snapshot.fetch("gateway_local"), *snapshot.fetch("devices"), snapshot.fetch("unclassified")]
+abort "missing downstream device #{owner}" unless snapshot.fetch("devices").any? { |row| row["key"] == owner }
+abort "duplicate observation owners" unless rows.map { |row| row.fetch("key") }.uniq.length == rows.length
+rows.each do |row|
+  owned = connections.select { |connection| connection.fetch("owner_key") == row.fetch("key") }
+  abort "connection count does not reconcile for #{row['key']}" unless row.fetch("active_connections") == owned.length
+  %w[upload download upload_rate download_rate].each do |field|
+    abort "#{field} does not reconcile for #{row['key']}" unless row.fetch(field) == owned.sum { |connection| connection.fetch(field) }
+  end
+end
+%w[active_connections upload download upload_rate download_rate].each do |field|
+  abort "gateway #{field} does not reconcile" unless snapshot.fetch("gateway_totals").fetch(field) == rows.sum { |row| row.fetch(field) }
+end
+puts "IPv6 connection observation verified: #{owner}, #{packets.length} active packet connections"
+RUBY
+}
+
 run_ipv6_userspace_test() {
   local client_one client_two source_one source_two gateway_started broker_pid iface rdnss client_gateway
-  local egress_probe_started dns_fixture_started http3_probe_started udp_proxy_started topology config_mode
+  local egress_probe_started dns_fixture_started http3_probe_started udp_proxy_started control_api_started topology config_mode
   topology="${1:-isolated_lan}"
   case "$topology" in
     isolated_lan) config_mode=ipv6 ;;
@@ -2656,6 +2706,7 @@ run_ipv6_userspace_test() {
 
   rm -f "$STATE_DIR/cache.db" "$STATE_DIR/cache.db-journal" \
     "$STATE_DIR/ipv6-packet.sock" "$STATE_DIR/ipv6-packet.sock.broker" "$STATE_DIR/ipv6-packet.ready"
+  rm -f "$STATE_DIR/ipv6-connection-observation.json"
   rm -rf "$STATE_DIR/egress"
   # Do not carry ad-hoc tcpdump files from an earlier diagnostic session into
   # a new artifact bundle; managed gateway logs are recreated by start.
@@ -2663,6 +2714,7 @@ run_ipv6_userspace_test() {
   write_ipv6_device_policy_fixture "$topology"
   build_ipv6_lab_binaries
   build_egress_probe
+  build_control_api
   build_http3_lab_binaries
   install_http3_lab_client
   write_tun_egress_provider
@@ -2672,6 +2724,7 @@ run_ipv6_userspace_test() {
     go build -o "$BINARY" ./cmd/omg
 
   gateway_started=0
+  control_api_started=0
   egress_probe_started=0
   dns_fixture_started=0
   http3_probe_started=0
@@ -2684,6 +2737,9 @@ run_ipv6_userspace_test() {
       for client in $CLIENTS; do
         limactl shell "$client" -- sudo /usr/local/bin/omg-lab-client clear-manual || true
       done
+    fi
+    if [[ "$control_api_started" == 1 ]]; then
+      stop_control_api || true
     fi
     if [[ "$gateway_started" == 1 ]]; then
       sudo -n "$BINARY" stop --config "$CONFIG" || true
@@ -2715,6 +2771,8 @@ run_ipv6_userspace_test() {
   udp_proxy_started=1
   sudo -n "$BINARY" start --config "$CONFIG"
   gateway_started=1
+  control_api_started=1
+  start_control_api
   rdnss="$(/sbin/ifconfig "$iface" | awk '/inet6 fe80:/ { split($2, value, "%"); print value[1]; exit }')"
   [[ "$rdnss" == fe80:* ]] || { echo "lab interface $iface has no link-local IPv6 gateway" >&2; exit 1; }
   if [[ "$topology" == "same_lan" ]]; then
@@ -2801,6 +2859,7 @@ run_ipv6_userspace_test() {
 
   limactl shell "$client_two" -- sudo /usr/local/bin/omg-lab-client ipv6-quic "$LAN_IP" "$IPV6_QUIC_TEST_HOST" "$IPV6_DNS_FIXTURE_PORT"
   wait_for_ipv6_policy_log UDP "$source_two" "$IPV6_QUIC_TEST_HOST:$IPV6_DNS_FIXTURE_PORT" "device/$client_two/default[DIRECT]"
+  assert_ipv6_connection_observation "$client_two"
 
   run_ipv6_http3_client "$client_two" "$source_two" "$IPV6_HTTP3_DIRECT_HOST" "/ipv6-http3-direct" "http3-client-direct.txt"
   grep -Fq 'CLIENT_IPV6_HTTP3_OK protocol=HTTP/3.0' "$STATE_DIR/egress/http3-client-direct.txt"
@@ -2841,6 +2900,8 @@ run_ipv6_userspace_test() {
   /sbin/ifconfig "$iface" | grep -Fq 'inet6 fdfe:dcba:9878::1'
 
   restore_client_control_dns
+  stop_control_api
+  control_api_started=0
   sudo -n "$BINARY" stop --config "$CONFIG"
   gateway_started=0
   stop_ipv6_udp_proxy
@@ -3321,6 +3382,14 @@ run_test() {
   [[ -r "$INTERFACE_FILE" ]] || { echo "lab is not up; run: make lab-up" >&2; exit 1; }
   require_cached_sudo
   ensure_lab_state_writable
+  echo "Lab public HTTPS probe: $TEST_URL"
+  if [[ "$LOCAL_ROUTING_TEST" == "true" && -z "${OMG_LAB_MIHOMO_BINARY:-}" ]]; then
+    # The local IPv6 identity assertions require fake-AAAA support from the
+    # same patched Mihomo line shipped by OpenSurge. The bootstrap v1.19.27
+    # Lab binary does not synthesize fake IPv6 on an IPv4-only Mac.
+    build_ipv6_lab_binaries
+    OMG_LAB_MIHOMO_BINARY="$PATCHED_MIHOMO_BINARY"
+  fi
   write_config "$mode"
   require_command go
   mkdir -p "$ROOT/bin"
@@ -3463,6 +3532,7 @@ run_test() {
 
 check_lab() {
   require_installed_lab
+  require_current_network_helper
   limactl --version
   /opt/socket_vmnet/bin/socket_vmnet --version
   dnsmasq --version | head -1

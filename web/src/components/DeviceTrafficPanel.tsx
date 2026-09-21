@@ -4,9 +4,11 @@ import { formatBytes, formatRate } from '../trafficFormat'
 import { deviceKey, gatewayLocalDeviceKey } from '../hooks/useDeviceTraffic'
 import { Empty, StatusDot } from './Common'
 import { TrafficTrendCard } from './TrafficTrendCard'
+import { connectionOwnerKey } from '../connections'
 import { t } from '../i18n'
 
 type DeviceTrafficPanelProps = {
+  onOpenConnections?: (owner?: string) => void
   gateway?: string
   traffic: DeviceTraffic | null
   history: TrafficHistoryPoint[]
@@ -15,7 +17,7 @@ type DeviceTrafficPanelProps = {
 
 const detailTransitionMs = 460
 
-export function DeviceTrafficPanel({ gateway, traffic, history, error }: DeviceTrafficPanelProps) {
+export function DeviceTrafficPanel({ gateway, traffic, history, error, onOpenConnections }: DeviceTrafficPanelProps) {
   const [selectedKey, setSelectedKey] = useState('')
   const [detailOpen, setDetailOpen] = useState(false)
   const closeTimer = useRef<number | null>(null)
@@ -42,7 +44,7 @@ export function DeviceTrafficPanel({ gateway, traffic, history, error }: DeviceT
   }
 
   return <section className="section traffic-section">
-    <div className="traffic-section-heading"><div><h2>{t('活跃设备')}</h2><p>{t('实时速度来自相邻连接样本；累计值仅覆盖当前活跃会话')}</p></div>{selectedDevice && <button type="button" onClick={() => selectDevice(selectedDevice)}>{t(detailOpen ? '收起趋势' : '展开趋势')}</button>}</div>
+    <div className="traffic-section-heading"><div><h2>{t('活跃设备')}</h2><p>{t('实时速度来自相邻连接样本；累计值仅覆盖当前活跃会话')}</p></div><div className="traffic-heading-actions">{onOpenConnections && <button type="button" onClick={() => onOpenConnections('all')}>{t('查看全部连接')}</button>}{selectedDevice && <button type="button" onClick={() => selectDevice(selectedDevice)}>{t(detailOpen ? '收起趋势' : '展开趋势')}</button>}</div></div>
     {error && !traffic ? <Empty text={t('暂时无法读取设备流量：{{error}}', { error })} /> : <>
       {traffic?.connection_error && <div className="notice warn">{t(gateway === 'running' || gateway === 'degraded' ? 'mihomo 连接数据暂时不可用；已有设备清单仍会显示。' : '网关未运行；DHCP 租约或已应用静态登记仍会显示，启动后才有活跃连接流量。')}</div>}
       <div className={`device-traffic-layout ${detailOpen ? 'expanded' : ''}`}>
@@ -68,13 +70,14 @@ export function DeviceTrafficPanel({ gateway, traffic, history, error }: DeviceT
             })}
           </div> : <Empty text={t(traffic ? '暂无 DHCP、静态登记或当前流量观察到的 LAN 设备' : '正在读取设备流量…')} />}
           {traffic && <div className="traffic-summary">
-            <strong>{t('合计 {{devices}} 台设备接入 · {{connections}} 个连接 · ↑ {{upload}} · ↓ {{download}}', { devices: traffic.totals.devices, connections: traffic.totals.active_connections, upload: formatRate(traffic.totals.upload_rate), download: formatRate(traffic.totals.download_rate) })}</strong>
+            <strong>{t('下游设备 {{devices}} 台 · {{connections}} 个连接 · ↑ {{upload}} · ↓ {{download}}', { devices: traffic.totals.devices, connections: traffic.totals.active_connections, upload: formatRate(traffic.totals.upload_rate), download: formatRate(traffic.totals.download_rate) })}</strong>
             {traffic.unidentified_device_connections > 0 && <small>{t('其中 {{connections}} 个待识别设备连接，仅确认了当前 LAN 源 IP。', { connections: traffic.unidentified_device_connections })}</small>}
-            {traffic.unclassified_connections > 0 && <small>{t('另有 {{connections}} 个连接无法判断来源，请在诊断中查看。', { connections: traffic.unclassified_connections })}</small>}
+            {traffic.unclassified_connections > 0 && <small>{t('另有 {{connections}} 个连接无法判断来源，可在连接页查看。', { connections: traffic.unclassified_connections })}</small>}
           </div>}
           {error && traffic && <small className="traffic-refresh-error">{t('刷新失败：{{error}}', { error })}</small>}
         </div>
         <aside className="device-trend-shell" aria-hidden={!detailOpen}>
+          {detailOpen && selectedDevice && onOpenConnections && <div className="traffic-view-connections"><button type="button" onClick={() => onOpenConnections(connectionOwnerKey(selectedDevice))}>{t('查看 {{name}} 的连接', { name: deviceName(selectedDevice) })}</button></div>}
           {selectedDevice && <TrafficTrendCard
             title={t('{{name}} 流量趋势', { name: deviceName(selectedDevice) })}
             subtitle={`${selectedDevice.ip} · ${selectedDevice.primary_egress || t('暂无出口信息')}`}

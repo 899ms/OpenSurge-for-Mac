@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, authenticationRequiredEvent, RequestError } from './api'
 import { PageErrorBoundary } from './components/PageErrorBoundary'
+import { ConnectionRefreshPrompts, queueConnectionRefreshSuggestion, type ConnectionRefreshSuggestion, type ConnectionRefreshSuggestionItem } from './components/ConnectionRefreshPrompts'
 import { OperationNotifications, type OperationNotification, type OperationNotificationItem } from './components/OperationNotifications'
 import { OperationProgress } from './components/OperationProgress'
 import { LanguageSelector } from './components/LanguageSelector'
 import { RecoveryBanner, StatusDot } from './components/Common'
 import { DashboardPage } from './pages/DashboardPage'
+import { ConnectionsPage } from './pages/ConnectionsPage'
+import { initialConnectionsView, type ConnectionsViewState } from './connections'
 import { ConnectivityPage } from './pages/ConnectivityPage'
 import { DevicesPage } from './pages/DevicesPage'
 import { DiagnosticsPage } from './pages/DiagnosticsPage'
@@ -17,7 +20,7 @@ import { operationStatusUnknownMessage } from './operations'
 import type { Overview } from './types'
 import { activateLanguage, cacheRequestedLanguage, initialRequestedLanguage, isRequestedLanguage, prepareLanguage, t, type RequestedLanguage } from './i18n'
 
-type Page = 'dashboard' | 'network' | 'sources' | 'devices' | 'policies' | 'connectivity' | 'diagnostics'
+type Page = 'dashboard' | 'network' | 'sources' | 'devices' | 'policies' | 'connections' | 'connectivity' | 'diagnostics'
 type Theme = 'dark' | 'light'
 type NetworkNavigationTarget = 'none' | 'control' | 'bottom'
 
@@ -26,6 +29,7 @@ const nav = [
   { id: 'network', label: '网络设置', icon: '⌁' },
   { id: 'sources', label: '代理与规则源', icon: '◎' },
   { id: 'devices', label: '设备', icon: '▣' },
+  { id: 'connections', label: '连接', icon: '⇅' },
   { id: 'policies', label: '策略', icon: '⇄' },
   { id: 'connectivity', label: '连通性', icon: '◌' },
   { id: 'diagnostics', label: '诊断', icon: '⌘' },
@@ -69,10 +73,14 @@ export function App() {
   const [language, setLanguage] = useState<RequestedLanguage>(initialRequestedLanguage)
   const [languageChanging, setLanguageChanging] = useState(false)
   const [devicesDirty, setDevicesDirty] = useState(false)
+  const [connectionsView, setConnectionsView] = useState<ConnectionsViewState>(initialConnectionsView)
+  const connectionsScroll = useRef<number | null>(null)
   const [policiesViewState, setPoliciesViewState] = useState<PoliciesViewState>({ search: '', scope: 'global', activeGroup: null })
   const [sleepPreventionChanging, setSleepPreventionChanging] = useState(false)
   const [notifications, setNotifications] = useState<OperationNotificationItem[]>([])
+  const [connectionRefreshSuggestions, setConnectionRefreshSuggestions] = useState<ConnectionRefreshSuggestionItem[]>([])
   const notificationID = useRef(0)
+  const connectionRefreshSuggestionID = useRef(0)
   const sleepPreventionGeneration = useRef(0)
   const languageGeneration = useRef(0)
   const policiesScrollPosition = useRef<number | null>(null)
@@ -162,6 +170,8 @@ export function App() {
       }
       if (pageRef.current === 'devices' && next !== 'devices') setDevicesDirty(false)
       if (pageRef.current === 'policies' && next !== 'policies') policiesScrollPosition.current = window.scrollY
+      if (pageRef.current === 'connections' && next !== 'connections') connectionsScroll.current = window.scrollY
+      if (next === 'connections') setConnectionsView(current => ({ ...current, owner: new URLSearchParams(window.location.search).get('owner') || 'all' }))
       setPage(next)
     }
     window.addEventListener('popstate', onPop)
@@ -178,13 +188,27 @@ export function App() {
         history.replaceState({}, '', `/${next}${networkNavigationHash(networkTarget)}`)
         focusGatewayControl(networkTarget)
       }
-      return
+      return true
     }
-    if (page === 'devices' && next !== 'devices' && devicesDirty && !window.confirm(t('设备页还有尚未保存的修改，确定离开并放弃这些修改吗？'))) return
+    if (page === 'devices' && next !== 'devices' && devicesDirty && !window.confirm(t('设备页还有尚未保存的修改，确定离开并放弃这些修改吗？'))) return false
     if (page === 'devices' && next !== 'devices') setDevicesDirty(false)
     if (page === 'policies' && next !== 'policies') policiesScrollPosition.current = window.scrollY
-    history.pushState({}, '', `/${next}${networkNavigationHash(networkTarget)}`)
+    if (page === 'connections' && next !== 'connections') connectionsScroll.current = window.scrollY
+    history.pushState({}, '', next === 'connections' ? `/connections?owner=${encodeURIComponent(connectionsView.owner)}` : `/${next}${networkNavigationHash(networkTarget)}`)
     setPage(next)
+    return true
+  }
+
+  const openConnections = (owner = 'all') => {
+    if (!go('connections')) return
+    setConnectionsView({ ...initialConnectionsView(), owner })
+    connectionsScroll.current = 0
+    history.replaceState({}, '', `/connections?owner=${encodeURIComponent(owner)}`)
+  }
+
+  const changeConnectionsView = (patch: Partial<ConnectionsViewState>) => {
+    setConnectionsView(current => ({ ...current, ...patch }))
+    if (patch.owner) history.replaceState({}, '', `/connections?owner=${encodeURIComponent(patch.owner)}`)
   }
 
   const setSleepPrevention = async (enabled: boolean) => {
@@ -213,6 +237,19 @@ export function App() {
   const dismissNotification = useCallback((id: number) => {
     setNotifications(current => current.filter(notification => notification.id !== id))
   }, [])
+
+  const suggestConnectionRefresh = useCallback((suggestion: ConnectionRefreshSuggestion) => {
+    const id = ++connectionRefreshSuggestionID.current
+    setConnectionRefreshSuggestions(current => queueConnectionRefreshSuggestion(current, suggestion, id))
+  }, [])
+
+  const dismissConnectionRefreshSuggestion = useCallback((id: number) => {
+    setConnectionRefreshSuggestions(current => current.filter(suggestion => suggestion.id !== id))
+  }, [])
+
+  useEffect(() => {
+    if (overview && overview.status.gateway !== 'running') setConnectionRefreshSuggestions([])
+  }, [overview?.status.gateway])
 
   const updatePoliciesViewState = useCallback((patch: Partial<PoliciesViewState>) => {
     setPoliciesViewState(current => {
@@ -244,17 +281,21 @@ export function App() {
         {overview?.recovery.required && needsNetworkRecoveryWarning(overview.recovery.stage) && <RecoveryBanner recovery={overview.recovery.stage} onOpen={() => go('network', 'control')} />}
         {error && <div className="error-banner" role="alert"><span>!</span><p>{error}</p><button onClick={() => void refresh()}>{t('重试')}</button></div>}
         <PageErrorBoundary key={page}>
-          {page === 'dashboard' && <DashboardPage overview={overview} onOpenNetwork={action => go('network', action === 'cleanup' ? 'control' : action === 'stop' ? 'bottom' : 'none')} />}
+          {page === 'dashboard' && <DashboardPage overview={overview} onOpenConnections={openConnections} onOpenNetwork={action => go('network', action === 'cleanup' ? 'control' : action === 'stop' ? 'bottom' : 'none')} />}
           {page === 'network' && <NetworkPage overview={overview} onChanged={refresh} onNavigate={() => go('devices')} onNotify={notify} />}
           {page === 'sources' && <SourcesPage overview={overview} onChanged={refresh} onNotify={notify} />}
-          {page === 'devices' && <DevicesPage overview={overview} onChanged={refresh} onNavigate={go} onDirtyChange={setDevicesDirty} onNotify={notify} />}
-          {page === 'policies' && <PoliciesPage overview={overview} onChanged={refresh} viewState={policiesViewState} onViewStateChange={updatePoliciesViewState} restoreScrollY={policiesScrollPosition.current} onScrollPositionChange={updatePoliciesScrollPosition} />}
+          {page === 'devices' && <DevicesPage overview={overview} onOpenConnections={openConnections} onChanged={refresh} onNavigate={go} onDirtyChange={setDevicesDirty} onNotify={notify} onSuggestConnectionRefresh={suggestConnectionRefresh} />}
+          {page === 'policies' && <PoliciesPage overview={overview} onChanged={refresh} onSuggestConnectionRefresh={suggestConnectionRefresh} viewState={policiesViewState} onViewStateChange={updatePoliciesViewState} restoreScrollY={policiesScrollPosition.current} onScrollPositionChange={updatePoliciesScrollPosition} />}
+          {page === 'connections' && <ConnectionsPage overview={overview} view={connectionsView} onViewChange={changeConnectionsView} restoreScrollY={connectionsScroll.current} />}
           {page === 'connectivity' && <ConnectivityPage overview={overview} onChanged={refresh} />}
-          {page === 'diagnostics' && <DiagnosticsPage overview={overview} />}
+          {page === 'diagnostics' && <DiagnosticsPage overview={overview} onOpenConnections={openConnections} />}
         </PageErrorBoundary>
       </>}
     </main>
-    {!authenticationRequired && <OperationProgress onOpenDiagnostics={() => go('diagnostics')} />}
+    {!authenticationRequired && <div className="bottom-right-stack">
+      <ConnectionRefreshPrompts suggestions={connectionRefreshSuggestions} onDismiss={dismissConnectionRefreshSuggestion} onRefreshed={refresh} />
+      <OperationProgress onOpenDiagnostics={() => go('diagnostics')} />
+    </div>}
     <OperationNotifications notifications={notifications} onDismiss={dismissNotification} />
   </div>
 }

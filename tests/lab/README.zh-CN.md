@@ -61,6 +61,11 @@ root-owned helper、socket_vmnet 副本、lab 日志和 sudoers 规则。
 加载该文件。默认情况下，Lima VM provisioning 不会接收这些代理变量；只有当代理
 端点能从 VM 内访问时，才设置 `OMG_LAB_VM_PROXY=1`。
 
+`lab-check` 和 `lab-up` 还会比较仓库中的固定功能 network helper、launchd plist 与
+root-owned 安装副本。任一副本过期时，只需运行
+`./tests/lab/install-host-deps.sh --root-only` 刷新这些 root 组件；即使 freshness 检查
+失败，清理命令仍然可用。
+
 ## 日常流程
 
 ```sh
@@ -78,6 +83,20 @@ sudo -v && \
 sudo -v && make lab-test-ipv6-userspace
 sudo -v && make lab-down
 ```
+
+公共 HTTPS 探针默认使用 `https://example.com/`。如果当前地区无法稳定直连这条
+Cloudflare 路径，应先选择一个在 Mac 上通过无代理直连预检的公共 HTTPS 端点，并在
+整轮测试中保持同一个值：
+
+```sh
+curl --noproxy '*' --fail --max-time 20 https://www.baidu.com/ >/dev/null
+sudo -v && OMG_LAB_TEST_URL=https://www.baidu.com/ make lab-test
+sudo -v && OMG_LAB_TEST_URL=https://www.baidu.com/ make lab-test-tun
+```
+
+guest helper 必须收到所选 URL，每条门槛也会打印实际探针。如果 host 侧等待一个域名、
+guest 却访问另一个域名，应归类为 Lab 参数传递错误，而不是产品数据路径结果。保留原始
+失败 artifact，并用已验证的地区端点重跑；不要把公共站点超时直接判定为网关回归。
 
 `lab-up` 会启动没有 DHCP 的 host network 和两个客户端。`lab-test` 会构建当前
 网关，用生成的 lab 配置启动它，刷新两个客户端租约，检查路由、DNS、ICMP/NAT、
@@ -213,6 +232,10 @@ QUIC/HTTP3 版本、0-RTT、连接迁移、公网节点或代理组合。
 
 `lab-test-ipv6-imported-egress` 是上述确定性门禁的外部补充，不替代本机 fixture。
 它要求显式提供一个真实 mihomo 订阅：
+
+如果 Mac 没有原生上游 IPv6，应在完成上述三条确定性 IPv6 门禁后停止，并把这项公网
+补充门禁记录为未运行。缺少上游 GUA 是该门禁的前置条件不满足，不代表受控 Lab 路径
+失败。
 
 ```sh
 sudo -v && \

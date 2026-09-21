@@ -64,8 +64,9 @@ function renderPage(customOverview = overview) {
   const onNavigate = vi.fn()
   const onDirtyChange = vi.fn()
   const onNotify = vi.fn()
-  render(<DevicesPage overview={customOverview} onChanged={onChanged} onNavigate={onNavigate} onDirtyChange={onDirtyChange} onNotify={onNotify} />)
-  return { onChanged, onNavigate, onDirtyChange, onNotify }
+  const onSuggestConnectionRefresh = vi.fn()
+  render(<DevicesPage overview={customOverview} onChanged={onChanged} onNavigate={onNavigate} onDirtyChange={onDirtyChange} onNotify={onNotify} onSuggestConnectionRefresh={onSuggestConnectionRefresh} />)
+  return { onChanged, onNavigate, onDirtyChange, onNotify, onSuggestConnectionRefresh }
 }
 
 describe('DevicesPage', () => {
@@ -225,7 +226,7 @@ describe('DevicesPage', () => {
   })
 
   it('shows the local global outlet only for fixed routing and keeps the policy-page shortcut', async () => {
-    const { onNavigate } = renderPage()
+    const { onNavigate, onSuggestConnectionRefresh } = renderPage()
     await screen.findByRole('heading', { name: '出口方式' })
     expect(screen.getByText('根据网站和网关规则自动分流')).toBeTruthy()
     expect(screen.queryByLabelText(/本机全局策略组/)).toBeNull()
@@ -242,6 +243,9 @@ describe('DevicesPage', () => {
     await waitFor(() => expect(api.setLocalRouting).toHaveBeenCalledWith('direct', undefined))
     expect(await screen.findByText('本机公网流量不使用代理')).toBeTruthy()
     expect(screen.queryByLabelText(/本机全局策略组/)).toBeNull()
+    expect(onSuggestConnectionRefresh).toHaveBeenNthCalledWith(1, expect.objectContaining({ key: 'gateway_local', scope: 'gateway_local', selection: 'Proxy-A' }))
+    expect(onSuggestConnectionRefresh).toHaveBeenNthCalledWith(2, expect.objectContaining({ key: 'gateway_local', scope: 'gateway_local', selection: 'Proxy-B' }))
+    expect(onSuggestConnectionRefresh).toHaveBeenNthCalledWith(3, expect.objectContaining({ key: 'gateway_local', scope: 'gateway_local', selection: '本机直连' }))
 
     await userEvent.click(screen.getByRole('button', { name: '前往策略与节点健康 →' }))
     expect(onNavigate).toHaveBeenCalledWith('policies')
@@ -301,7 +305,7 @@ describe('DevicesPage', () => {
     }))
     let finishSwitch!: () => void
     vi.mocked(api.selectDevicePolicy).mockReturnValueOnce(new Promise(resolve => { finishSwitch = () => resolve({} as never) }))
-    renderPage(deviceOverview)
+    const { onSuggestConnectionRefresh } = renderPage(deviceOverview)
     const defaultOutlet = await screen.findByLabelText('alice 独立出口 当前摘要')
     const ruleToggle = screen.getByRole('button', { name: /规则出口（1）/ })
     expect(ruleToggle.getAttribute('aria-expanded')).toBe('false')
@@ -316,6 +320,7 @@ describe('DevicesPage', () => {
     expect((proxyOption as HTMLButtonElement).disabled).toBe(true)
     finishSwitch()
     await waitFor(() => expect(api.selectDevicePolicy).toHaveBeenCalledWith('alice', 'default', 'Proxy-A'))
+    expect(onSuggestConnectionRefresh).toHaveBeenCalledWith({ key: 'device:alice', scope: 'device', deviceID: 'alice', subject: 'alice', selection: 'Proxy-A' })
   })
 
   it('separates an applied inherited route from a draft dedicated route', async () => {

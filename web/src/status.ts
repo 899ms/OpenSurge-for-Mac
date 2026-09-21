@@ -8,6 +8,18 @@ export function statusLabel(status?: string, runtimeState?: string) {
         : t('无法连接')
 }
 
+export function takeoverLabel(status?: string) {
+  const label = ({
+    ready: '正在接管',
+    waiting: '等待上游 IPv6',
+    stopped: '已停止',
+    disabled: '已关闭',
+    failed: '运行异常',
+    interrupted: '重启后待清理',
+  } as Record<string, string>)[status ?? '']
+  return label ? t(label) : t('未知')
+}
+
 export function recoveryLabel(stage: string) {
   const label = ({
     prepared: '恢复资料已准备',

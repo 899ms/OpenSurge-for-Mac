@@ -148,6 +148,13 @@ Service。只有卸载、重新安装或修改系统级 Helper 才进入需要�
 因此 raw `forwarding == enabled` 不能单独算作 OpenSurge 服务仍活跃，也不能阻止完整退出
 或卸载。gateway manager 仍必须记录并恢复启动前 forwarding 值。
 
+菜单栏与 Web GUI 总览用“IPv4 接管”和“IPv6 接管”展示按地址族归一化后的运行状态，
+不能把 raw forwarding 直接改名成 IPv4 接管。IPv4 只有在当前 boot 的 gateway runtime
+active、PF anchor loaded、forwarding enabled 且整体 gateway running 时才显示正在接管；
+停止态即使宿主原本已经启用 forwarding 也显示已停止。IPv6 接管来自用户态 packet path，
+区分正在接管、自动模式等待上游、已关闭、已停止、异常与重启后待清理。底层
+`forwarding`、`ipv6_packet`、`native_ipv6_available` 和 `ipv6_reason` 继续保留用于诊断。
+
 菜单栏提供独立“卸载 OpenSurge”入口。卸载只以 `gateway == stopped` 为门禁，不受
 recovery 阶段影响；确认窗口允许保留配置/订阅/策略数据或彻底删除全部数据。管理员授权
 后只调用 pkg 安装到固定系统目录、root 拥有的卸载脚本；脚本必须自行再次确认 gateway
@@ -192,11 +199,15 @@ OFFER 探测不可用，认证后的 Web GUI 提供带断网警告和显式人�
 自动 DHCP 恢复，直接进入 `complete_static`。该动作不调用 `ProbeDHCP` 或 `SetDHCP`，必须
 保留持久化说明，并提示其他客户端需要有效静态配置或另一个 DHCP 服务器。
 
-初次启动、停止、重载、Mihomo 恢复，以及设备策略/来源/Tailscale 配置应用，复用全局
-operation 进度卡。客户端提交即显示等待状态，后续 `phase`、`phase_started_at`、
+初次启动、停止、重载、Mihomo 恢复、路由器 DHCP 关闭/恢复 OFFER 检查，以及设备策略/
+来源/Tailscale 配置应用，复用全局 operation 进度卡。客户端提交即显示等待状态，后续 `phase`、`phase_started_at`、
 `notices` 来自 Go 生命周期实际边界；只显示阶段与耗时，不模拟百分比。进度卡在页面
-切换后继续显示，刷新时只恢复未完成操作，不重新弹出旧成功记录。网络页的 DHCP 接管
-client acceptance 不会被“启动完成”替代。
+切换后继续显示，刷新时只恢复未完成操作，不重新弹出旧完成记录。当前没有未收起的进行中
+操作时，只展示最新操作的结果；该结果被关闭或自动消失后，不回退展示旧成功或失败。
+轮询更新不能改变同一创建时间下的首次登记顺序，旧记录仍保留供诊断查看。
+DHCP 检查复用同步请求的关联 ID，探测期间报告 `probing_dhcp`；只有探测结果符合要求且
+恢复状态保存成功后，才显示完成。未收到 OFFER 只表示本次探测结果，不扩大为路由器状态的
+绝对保证。网络页的 DHCP 接管 client acceptance 不会被“启动完成”替代。
 
 Helper 请求可选 `watch_progress`：新 Helper 先发送带 `progress` 的 JSON 帧，最后仍
 返回原有结果；旧客户端不请求该字段时只收到最终帧，新客户端也兼容旧 Helper 的单帧
@@ -214,20 +225,53 @@ Helper 请求可选 `watch_progress`：新 Helper 先发送带 `progress` 的 JS
 写入标记，以免后续启动继续访问 Keychain；旧项不自动删除。迁移失败不能阻止 Control
 Service 启动，已有来源快照继续可用，用户可重新导入 URL 恢复刷新能力。
 
-设备流量面板使用独立的受认证 `GET /api/v1/device-traffic`，不要在前端重复解释 raw
-connections。后端用 DHCP lease、applied 静态设备和当前观察到的网关 LAN 源 IPv4 建立
-下游 inventory，再按 mihomo `metadata.sourceIP` 归属当前活跃会话。带本机 process/
-processPath 证据、来自回环/网关地址或与这些证据共享源地址的连接聚合到独立
-`gateway_local`，不能把 Mac 放进 `devices`、下游设备数量或策略身份模型。GUI 在“活跃
+总览使用受认证的 `GET /api/v1/device-traffic`，连接页使用 `GET /api/v1/connections`。
+两者复用同一份后端归属、计数器差值和一秒内共享的采样；配置、运行状态、租约或登记
+变化会使缓存失效。不要在前端重复解释 raw connections 的设备身份。后端用 DHCP lease、
+applied 设备、desired 登记和当前观察到的网关 LAN 源 IPv4 建立清单。只有已进入 applied
+bundle 的 compiled devices 可以作为运行中的登记身份；未应用、暂停的 IP-only 登记和
+网段外设备保留在清单中，但不能作为归属证据。IPv4 仍按源地址归属，冲突身份不强行合并。
+本机身份由
+`internal/controlapi/gateway_local.go` 统一判断：系统 TUN 快照额外读取一次 mihomo
+`/configs` 的实际 `inet4-address`/`inet6-address`，同时要求 `type=Tun`、
+`inboundName=DEFAULT-TUN` 和精确本机源地址。只取接口地址，不取整个 CIDR；下游也
+经过 `DEFAULT-TUN`，并可能具有相同 `inboundIP`，所以入口字段不能单独证明本机来源。
+回环/网关 Mac 源地址仍作为本机身份，但 `opensurge-ipv6` listener 和
+`inboundUser=device:…` 优先排除。累计流量、速率和本机关闭连接操作复用这个判断。
+
+不能用 `process/processPath` 或共享源 IP 推断本机身份。mihomo 默认 `strict` 只在
+规则需要时查询进程；订阅有无 `PROCESS-NAME`、规则顺序、进程查询失败都不能改变
+流量归属。不能通过强制 `find-process-mode: always` 代替身份修复。IPv6 地址必须来自
+实际运行状态，不能按 desired `auto` 或旧快照同时猜测 fake-AAAA 与显式 TUN 两种身份。
+读取 TUN 身份失败时，流量 API 返回 `connection_error` 并保留可确认的清单；本机关闭
+连接接口返回 `local_identity_unavailable`，不部分执行。纯显式代理快照不额外读 `/configs`。
+
+本机连接聚合到独立 `gateway_local`，不能把 Mac 放进 `devices`、下游设备数量或策略身份模型。GUI 在“活跃
 设备”中固定把“本机 Mac”显示为第一行，并根据实际 connection type 显示 TUN、显式代理
 或两者；网关停止时显示网关未运行。
 
 没有 DHCP/静态身份但能确认网关 LAN 源 IPv4 的行使用 `observed_traffic`，其连接数进入
 `unidentified_device_connections`，GUI 称为“待识别设备连接”。地址缺失、网段外且没有
-本机证据等剩余连接进入 `unclassified_connections`，只提示到诊断页查看。
+本机证据等剩余连接进入 `unclassified_connections`，可在连接页的“无法归属”中查看。
 `unmatched_connections` 是旧客户端兼容字段，当前 GUI 不再用它解释来源身份。
 `identity_source` 必须区分 `gateway_local`、`dhcp_lease`、`registered_static` 与
-`observed_traffic`。主出口按累计字节最多的完整 chain 选择。
+`observed_traffic`；无法归属的独立汇总行使用 `unclassified`。主出口按累计字节最多的完整 chain 选择。
+
+下游 IPv6 归属必须同时满足 `type=Tun`、`inboundName=opensurge-ipv6`、合法 IPv6
+源地址和 `inboundUser=device:<id>`，且 ID 对应当前 LAN 中带 MAC 的有效 applied 设备。
+同一设备的 IPv4、多条 IPv6 隐私地址聚合到 `device:<id>`；未知 ID、其他 listener、
+缺少身份或 MAC 冲突保留为无法归属，不能按 IPv6 前缀或进程猜测。本机精确 TUN 身份
+仍优先排除下游身份。`connections[].owner_key`、`source_family` 和速率由后端统一给出；
+`gateway_totals = gateway_local + totals + unclassified`，计数、会话字节和速率均可核对。
+这里的网关总量也只表示当前活跃连接，不等同于网卡累计字节或 mihomo 历史总量。
+
+连接页是独立一级导航，设备页继续负责配置，诊断页负责操作/Provider/日志。总览与设备页
+可按 owner 深链接到连接页。筛选、排序、选择设备和滚动位置在切页返回时保留；每页最多
+显示 50 条连接。暂停会取消进行中的请求并固定画面，恢复后重新采样；页面隐藏或卸载时
+停止有效更新。连接离开快照后仅保留选中项的最后详情，不把它扩展成历史连接日志。
+“有租约”“已应用登记”“观察到流量”分别展示，没有活跃连接不表示设备离线。
+主路由旁路的 IPv4 显示不在统计范围内。网络错误保留上次快照并标注过时；核心不可用
+仍返回清单并隐藏统计；租约/登记读取错误单独以 `inventory_error` 标明清单可能不完整。
 
 这是 `active_sessions` 快照，不是持久化历史。mihomo 不可用时仍返回本机、lease 与
 applied 静态设备 inventory，并通过 `connection_error` 明确统计不可用。实时 bytes/s
@@ -333,6 +377,15 @@ OpenSurge lease 自动填写 hostname、MAC 与 IPv4；`same_lan` 则列出 miho
 主界面不把 Profile 作为复用对象：默认展开的“规则库”只显示规则集、无出口分流模版和
 设备分流。设备卡的“编辑设备分流”直接打开对应设备；旧的独立设备规则卡片和
 “高级 / 复用”卡片不再渲染。
+
+运行态实际切换 Mac 本机模式/固定出口或已应用设备的 selector 后，Web GUI 在全局
+右下角保留作用域明确的连接刷新提示；切页不会丢失，同一对象连续切换只保留最新选择。
+它默认不打断连接，必须由用户显式调用
+`POST /api/v1/local-routing/connections/refresh` 或
+`POST /api/v1/devices/<id>/connections/refresh`。刷新按最新快照关闭该作用域内当前由
+OpenSurge 管理的全部匹配连接，并不只筛选仍使用旧出口的连接，也不保证客户端自动重连。
+因此文案必须提示下载、通话等可能中断。停止态预选、重复选择和无法确定受影响设备的
+共享策略组不产生刷新邀请；卡片内原有的手动刷新入口继续保留。
 
 设备卡自身提供整设备管理：「编辑身份与路由」复用登记面板并预填现有身份，「删除设备」
 同时清理该设备的私有 Profile。两者都只改本地草稿，仍走同一次“保存设备配置”。设备

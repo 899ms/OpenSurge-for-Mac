@@ -200,7 +200,8 @@ struct MenuContentView: View {
             row("mihomo", localizedRuntimeState(status.mihomo))
             row("TUN", status.tunInterface.map { "\(localizedRuntimeState(status.tun ?? "unknown")) · \($0)" } ?? localizedRuntimeState(status.tun ?? "unknown"))
             row("PF", localizedRuntimeState(status.pfAnchor))
-            row(L10n.text("IPv4 转发"), localizedRuntimeState(status.forwarding))
+            row(L10n.text("IPv4 接管"), localizedTakeoverState(status.ipv4TakeoverState))
+            row(L10n.text("IPv6 接管"), localizedTakeoverState(status.ipv6TakeoverState))
         }.font(.caption)
     }
 
@@ -232,6 +233,18 @@ private func localizedRuntimeState(_ state: String) -> String {
     case "failed": L10n.text("失败")
     case "unknown": L10n.text("未知")
     default: state
+    }
+}
+
+private func localizedTakeoverState(_ state: String) -> String {
+    switch state.lowercased() {
+    case "ready": L10n.text("正在接管")
+    case "waiting": L10n.text("等待上游 IPv6")
+    case "stopped": L10n.text("已停止")
+    case "disabled": L10n.text("已关闭")
+    case "failed": L10n.text("运行异常")
+    case "interrupted": L10n.text("重启后待清理")
+    default: L10n.text("未知")
     }
 }
 

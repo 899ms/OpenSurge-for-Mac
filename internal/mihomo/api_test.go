@@ -57,7 +57,7 @@ func TestFetchTUNRuntimeState(t *testing.T) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Status:     "200 OK",
-			Body:       io.NopCloser(strings.NewReader(`{"tun":{"enable":true,"device":"utun123"}}`)),
+			Body:       io.NopCloser(strings.NewReader(`{"tun":{"enable":true,"device":"utun123","inet4-address":["198.18.0.1/30"],"inet6-address":["fdfe:dcba:9877::1/126"]}}`)),
 			Header:     make(http.Header),
 		}, nil
 	})}
@@ -66,7 +66,9 @@ func TestFetchTUNRuntimeState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !state.Enabled || state.Device != "utun123" {
+	if !state.Enabled || state.Device != "utun123" ||
+		!reflect.DeepEqual(state.IPv4Addresses, []string{"198.18.0.1/30"}) ||
+		!reflect.DeepEqual(state.IPv6Addresses, []string{"fdfe:dcba:9877::1/126"}) {
 		t.Fatalf("state = %#v", state)
 	}
 }

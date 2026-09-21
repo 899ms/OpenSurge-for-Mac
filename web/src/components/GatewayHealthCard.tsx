@@ -1,4 +1,4 @@
-import { statusLabel } from '../status'
+import { statusLabel, takeoverLabel } from '../status'
 import type { Overview } from '../types'
 import { StatusDot } from './Common'
 import { t } from '../i18n'
@@ -20,7 +20,8 @@ export function GatewayHealthCard({ overview }: { overview: Overview | null }) {
       <ServiceState label="mihomo" state={status?.mihomo} />
       <ServiceState label={status?.tun_interface ? `TUN · ${status.tun_interface}` : 'TUN'} state={status?.tun} />
       <ServiceState label="PF Anchor" state={status?.pf_anchor} />
-      <ServiceState label={t('IPv4 转发')} state={status?.forwarding} />
+      <ServiceState label={t('IPv4 接管')} state={status?.ipv4_takeover} value={takeoverLabel(status?.ipv4_takeover)} />
+      <ServiceState label={t('IPv6 接管')} state={status?.ipv6_takeover} value={takeoverLabel(status?.ipv6_takeover)} />
     </div>
   </article>
 }
@@ -29,8 +30,8 @@ function GatewayMeta({ label, value, tone = '' }: { label: string; value: string
   return <span className={`gateway-meta ${tone}`.trim()}><small>{t(label)}</small><strong>{t(value)}</strong></span>
 }
 
-function ServiceState({ label, state = '—' }: { label: string; state?: string }) {
-  return <span className="gateway-service-state"><StatusDot status={state} /><span><strong>{t(label)}</strong><small>{t(state)}</small></span></span>
+function ServiceState({ label, state = '—', value }: { label: string; state?: string; value?: string }) {
+  return <span className="gateway-service-state"><StatusDot status={state} /><span><strong>{t(label)}</strong><small>{value ?? t(state)}</small></span></span>
 }
 
 function topologyLabel(topology?: string) {

@@ -67,6 +67,12 @@ provisioning does not receive those proxy variables by default; set
 `OMG_LAB_VM_PROXY=1` only when the proxy endpoint is reachable from inside the
 VMs.
 
+`lab-check` and `lab-up` also compare the repository's fixed-function network
+helper and launchd plist with the root-owned installed copies. If either copy
+is stale, refresh only those root components with
+`./tests/lab/install-host-deps.sh --root-only`; teardown remains available even
+when this freshness check fails.
+
 ## Daily workflow
 
 ```sh
@@ -85,6 +91,23 @@ sudo -v && \
 sudo -v && make lab-test-ipv6-userspace
 sudo -v && make lab-down
 ```
+
+The public HTTPS probe defaults to `https://example.com/`. If that Cloudflare
+path is not reliably reachable from the current region, select a public HTTPS
+endpoint that first passes a direct, no-proxy host preflight and keep the value
+fixed for the whole run:
+
+```sh
+curl --noproxy '*' --fail --max-time 20 https://www.baidu.com/ >/dev/null
+sudo -v && OMG_LAB_TEST_URL=https://www.baidu.com/ make lab-test
+sudo -v && OMG_LAB_TEST_URL=https://www.baidu.com/ make lab-test-tun
+```
+
+The guest helper must receive the selected URL, and each gate prints the
+effective probe. A host-side expectation for one hostname paired with guest
+traffic to another hostname is a Lab wiring failure, not a product-path
+result. Keep the original failure artifact and rerun with the verified regional
+endpoint rather than treating a public-site timeout as a gateway regression.
 
 `lab-up` starts the DHCP-free host network and the two clients. `lab-test`
 builds the current gateway, starts it with the generated lab config, renews both
@@ -274,6 +297,11 @@ migration, public node, or proxy combination.
 
 `lab-test-ipv6-imported-egress` complements that deterministic gate; it does
 not replace the local fixtures. Supply an actual mihomo profile explicitly:
+
+If the Mac has no native upstream IPv6, stop after the three deterministic
+IPv6 gates above and record this external supplement as not run. Lack of an
+upstream GUA is an unmet prerequisite for this gate, not a failure of the
+controlled Lab paths.
 
 ```sh
 sudo -v && \

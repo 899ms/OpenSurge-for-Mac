@@ -357,7 +357,7 @@ func TestTailscaleRulesReuseScopedLocalMacIPv6Identities(t *testing.T) {
 			cfg.Tailscale.MagicDNSSuffixes = []string{"home.example.ts.net"}
 
 			rules := strings.Join(renderTailscaleRules(cfg, policySections{}), "\n")
-			want := "(IN-NAME," + localRoutingSystemTUNName + "),(SRC-IP-CIDR," + tt.wantIPv6 + ")"
+			want := "(IN-NAME," + SystemTUNListenerName + "),(SRC-IP-CIDR," + tt.wantIPv6 + ")"
 			if !strings.Contains(rules, want) {
 				t.Fatalf("Tailscale rules missing scoped local IPv6 identity %q:\n%s", want, rules)
 			}

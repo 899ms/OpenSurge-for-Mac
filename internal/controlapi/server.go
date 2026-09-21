@@ -77,6 +77,7 @@ type Server struct {
 	measureProxyDelay     func(context.Context, config.Config, string, string, time.Duration) mihomo.ProxyDelayResult
 	probeConnectivity     func(context.Context, config.Config, ConnectivityTarget) ConnectivityResult
 	trafficSampler        *trafficRateSampler
+	connectionObservation connectionObservationCache
 	gatewayStatus         func(context.Context, config.Config) (gateway.Status, error)
 	doctor                *doctorController
 	mihomoRecovery        *mihomoRecoveryController
@@ -305,6 +306,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /api/v1/device-policy", s.auth(http.HandlerFunc(s.handleDevicePolicy)))
 	mux.Handle("GET /api/v1/devices", s.auth(http.HandlerFunc(s.handleDevices)))
 	mux.Handle("GET /api/v1/device-traffic", s.auth(http.HandlerFunc(s.handleDeviceTraffic)))
+	mux.Handle("GET /api/v1/connections", s.auth(http.HandlerFunc(s.handleConnections)))
 	mux.Handle("POST /api/v1/devices/{device}/connections/refresh", s.auth(http.HandlerFunc(s.handleDeviceConnectionRefresh)))
 	mux.Handle("POST /api/v1/devices/{device}/selectors/{slot}", s.auth(http.HandlerFunc(s.handleDeviceSelection)))
 	mux.Handle("GET /api/v1/policies", s.auth(http.HandlerFunc(s.handlePolicies)))
@@ -661,6 +663,7 @@ func (s *Server) handleMenuBar(w http.ResponseWriter, r *http.Request) {
 		SchemaVersion: SchemaVersion, Revision: overview.Revision, Gateway: overview.Status.Gateway,
 		Topology: cfg.Gateway.Mode, LANIP: overview.Status.LANIP, DHCP: overview.Status.DHCP,
 		Mihomo: overview.Status.Mihomo, MihomoError: overview.Status.MihomoError, PFAnchor: overview.Status.PFAnchor, Forwarding: overview.Status.Forwarding,
+		IPv4Takeover: overview.Status.IPv4Takeover, IPv6Takeover: overview.Status.IPv6Takeover,
 		TUN: overview.Status.TUN, TUNInterface: overview.Status.TUNInterface, TUNError: overview.Status.TUNError,
 		ClientCount: overview.Status.ClientCount, Drift: overview.Drift, DoctorHealthy: overview.DoctorHealthy,
 		Recovery: overview.Recovery.Required, RecoveryStage: overview.Recovery.Stage, Warnings: overview.Warnings,
@@ -1392,20 +1395,30 @@ func (s *Server) handleDHCPProbe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "recovery_precondition", "Mac static IPv4 must be applied before probing for router DHCP")
 		return
 	}
-	servers, err := s.networkRunner.ProbeDHCP(r.Context(), s.configPath, cfg.Gateway.Interface, 3*time.Second)
+	ctx, operation, ok := s.beginRequestOperation(w, r, "dhcp-probe")
+	if !ok {
+		return
+	}
+	gateway.ReportProgress(ctx, "probing_dhcp")
+	servers, err := s.networkRunner.ProbeDHCP(ctx, s.configPath, cfg.Gateway.Interface, 3*time.Second)
 	if err != nil {
+		s.finishOperation(operation, err)
 		writeError(w, http.StatusBadGateway, "dhcp_probe_failed", err.Error())
 		return
 	}
 	if len(servers) > 0 {
-		writeError(w, http.StatusConflict, "competing_dhcp", "DHCP server is still answering: "+strings.Join(servers, ", "))
+		err := fmt.Errorf("DHCP server is still answering: %s", strings.Join(servers, ", "))
+		s.finishOperation(operation, err)
+		writeError(w, http.StatusConflict, "competing_dhcp", err.Error())
 		return
 	}
 	state.Stage, state.Required = RecoveryRouterDHCPDisabledConfirmed, true
 	if err := s.store.SaveRecovery(state); err != nil {
+		s.finishOperation(operation, err)
 		writeError(w, http.StatusInternalServerError, "recovery_write_failed", err.Error())
 		return
 	}
+	s.finishOperation(operation, nil)
 	writeJSON(w, http.StatusOK, NetworkActionResponse{SchemaVersion: SchemaVersion, Recovery: state, DHCPServers: []string{}})
 }
 
@@ -1415,20 +1428,30 @@ func (s *Server) handleRouterRestored(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "recovery_precondition", "stop OpenSurge before verifying restored router DHCP")
 		return
 	}
-	servers, err := s.networkRunner.ProbeDHCP(r.Context(), s.configPath, state.NetworkSnapshot.Interface, 3*time.Second)
+	ctx, operation, ok := s.beginRequestOperation(w, r, "router-dhcp-restored")
+	if !ok {
+		return
+	}
+	gateway.ReportProgress(ctx, "probing_dhcp")
+	servers, err := s.networkRunner.ProbeDHCP(ctx, s.configPath, state.NetworkSnapshot.Interface, 3*time.Second)
 	if err != nil {
+		s.finishOperation(operation, err)
 		writeError(w, http.StatusBadGateway, "dhcp_probe_failed", err.Error())
 		return
 	}
 	if len(servers) == 0 {
-		writeError(w, http.StatusConflict, "router_dhcp_missing", "no DHCP server answered after the router was marked restored")
+		err := errors.New("no DHCP server answered after the router was marked restored")
+		s.finishOperation(operation, err)
+		writeError(w, http.StatusConflict, "router_dhcp_missing", err.Error())
 		return
 	}
 	state.Stage, state.Required = RecoveryRouterDHCPRestored, true
 	if err := s.store.SaveRecovery(state); err != nil {
+		s.finishOperation(operation, err)
 		writeError(w, http.StatusInternalServerError, "recovery_write_failed", err.Error())
 		return
 	}
+	s.finishOperation(operation, nil)
 	writeJSON(w, http.StatusOK, NetworkActionResponse{SchemaVersion: SchemaVersion, Recovery: state, DHCPServers: servers})
 }
 

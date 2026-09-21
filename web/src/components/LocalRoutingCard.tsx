@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
 import type { LocalRouting, LocalRoutingMode, ProxyHealthEntry } from '../types'
+import { policyDisplayName } from '../policyDisplay'
 import { ConnectionRefreshControl } from './ConnectionRefreshControl'
+import type { ConnectionRefreshSuggestion } from './ConnectionRefreshPrompts'
 import { OutletSummary } from './OutletSummary'
 import { t } from '../i18n'
 
@@ -20,6 +22,7 @@ export function LocalRoutingCard({
   onHealthTest,
   onChanged,
   onPolicies,
+  onSuggestConnectionRefresh,
 }: {
   running: boolean
   interfaceName?: string
@@ -29,6 +32,7 @@ export function LocalRoutingCard({
   onHealthTest: (names: string[]) => Promise<void>
   onChanged: () => Promise<void>
   onPolicies: () => void
+  onSuggestConnectionRefresh?: (suggestion: ConnectionRefreshSuggestion) => void
 }) {
   const [routing, setRouting] = useState<LocalRouting | null>(null)
   const [busy, setBusy] = useState(false)
@@ -54,8 +58,16 @@ export function LocalRoutingCard({
     setBusy(true)
     setError('')
     try {
+      const previous = routing
       const updated = await api.setLocalRouting(mode, globalPolicy)
       setRouting(updated)
+      const changed = previous?.mode !== updated.mode || (updated.mode === 'global' && previous?.global_group?.selected !== updated.global_group?.selected)
+      if (changed) {
+        const selection = updated.mode === 'global' && updated.global_group
+          ? policyDisplayName(updated.global_group.selected, healthByName.get(updated.global_group.selected))
+          : t(modeDetails[updated.mode].label)
+        onSuggestConnectionRefresh?.({ key: 'gateway_local', scope: 'gateway_local', subject: t('Mac 本机'), selection })
+      }
       await onChanged()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))

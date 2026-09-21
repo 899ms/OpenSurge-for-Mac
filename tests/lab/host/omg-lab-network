@@ -85,15 +85,26 @@ start_network() {
     exit 1
   fi
 
-  iface=$(interface_with_lab_ip || true)
-  if [ -z "$iface" ]; then
-    for candidate in $(vmnet_bridges); do
-      case "$before" in
-        *" $candidate "*) ;;
-        *) iface=$candidate; break ;;
-      esac
-    done
-  fi
+  # The socket can become ready before vmnet publishes its vmenet/bridge
+  # interfaces. Wait for both pieces of host state instead of treating that
+  # short startup window as a permanent interface-discovery failure.
+  iface=""
+  attempts=0
+  while [ -z "$iface" ] && [ "$attempts" -lt 100 ]; do
+    iface=$(interface_with_lab_ip || true)
+    if [ -z "$iface" ]; then
+      for candidate in $(vmnet_bridges); do
+        case "$before" in
+          *" $candidate "*) ;;
+          *) iface=$candidate; break ;;
+        esac
+      done
+    fi
+    if [ -z "$iface" ]; then
+      attempts=$((attempts + 1))
+      /bin/sleep 0.1
+    fi
+  done
   if [ -z "$iface" ]; then
     /bin/cat "$LOG_FILE" >&2
     echo "unable to identify the vmnet host interface" >&2
